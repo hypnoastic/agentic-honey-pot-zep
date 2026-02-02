@@ -35,7 +35,7 @@ TASK:
 Respond with JSON ONLY:
 {{
     "verdict": "GUILTY" | "INNOCENT" | "SUSPICIOUS",
-    "confidence_score": 0.95,
+    "confidence_score": 0.0-1.0,
     "reasoning": "The user explicitly asked for money..."
 }}"""
 

@@ -125,41 +125,26 @@ def _route_from_planner(state: HoneypotState) -> Literal["engage", "judge", "end
     # We shouldn't loop back to Planner in Live Mode?
     # Correct. In LIVE mode, we do ONE step.
     
-    if state.get("execution_mode") == "live":
-        if action == "engage":
-            return "engage"
-        elif action == "judge":
-            return "judge"
-        else:
-            return "end"
+    if action == "engage":
+        return "engage"
+    elif action == "judge":
+        return "judge"
+    else:
+        return "end"
 
-    return action
-
-
-def _route_after_engagement(state: HoneypotState):
-    # This logic is now handled by the Planner loop
-    pass
 
 def _route_after_extraction(state: HoneypotState) -> Literal["loop", "exit"]:
     """
     Route after intelligence extraction.
-    Live Mode: Exit loop (Single Turn).
-    Simulation Mode: Loop back to Planner.
+    Always exit loop (Single Turn).
     """
-    if state.get("execution_mode") == "live":
-        return "exit"
-        
-    if state.get("engagement_complete", False):
-        return "exit"
-        
-    return "loop"
+    return "exit"
 
 
 async def run_honeypot_analysis(
     message: str, 
     max_engagements: int = 5,
-    conversation_id: Optional[str] = None,
-    execution_mode: str = "simulation"
+    conversation_id: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Run the complete honeypot analysis workflow with Zep memory.
@@ -168,7 +153,6 @@ async def run_honeypot_analysis(
         message: The incoming message to analyze
         max_turns: Maximum engagement turns with scammer
         conversation_id: Optional conversation ID for memory continuity
-        execution_mode: "simulation" or "live"
         
     Returns:
         Final analysis response
@@ -185,12 +169,84 @@ async def run_honeypot_analysis(
     # Load memory context from Zep
     memory_context = {}
     try:
-        from memory.zep_memory import load_conversation_memory, persist_conversation_memory, is_zep_available
+        from memory.zep_memory import load_conversation_memory, persist_conversation_memory, is_zep_available, search_similar_scams
         
         if is_zep_available():
+            # 1. Load Session Memory (Thread Context)
             memory_context = await load_conversation_memory(conversation_id)
             if memory_context.get("prior_messages"):
                 logger.info(f"Loaded {len(memory_context['prior_messages'])} prior messages from Zep")
+            
+            # 2. Semantic Search (Cross-Session Intelligence)
+            # Find similar past scams to inform current detection
+            from memory.zep_memory import search_similar_scams, get_scam_signal
+            
+            # A. Lightweight Signal (For Initial Detection)
+            zep_signal = await get_scam_signal(message)
+            memory_context["zep_signal"] = zep_signal
+            logger.info(f"ZEP SIGNAL: Count={zep_signal['similar_count']}, Type={zep_signal['common_type']}")
+
+            # B. Detailed Context (For Planner)
+            similar_scams = await search_similar_scams(message, limit=3)
+            max_similarity = 0.0
+            if similar_scams:
+                descriptions = [s.get("content", "") for s in similar_scams]
+                scores = [s.get("score", 0.0) for s in similar_scams]
+                max_similarity = max(scores) if scores else 0.0
+                
+                memory_context["prior_scam_types"] = descriptions
+                logger.info(f"ZEP INTELLIGENCE: Found {len(descriptions)} similar past scam patterns. Max Sim: {max_similarity:.2f}")
+            
+            memory_context["familiarity_score"] = max_similarity
+            
+            # 3. Successful Tactics (Winning Behaviours)
+            from memory.zep_memory import search_winning_strategies, search_past_failures
+            
+            # Find what worked...
+            winning_strategies = await search_winning_strategies("scam", limit=3)
+            if winning_strategies:
+                memory_context["winning_strategies"] = winning_strategies
+                logger.info(f"ZEP STRATEGY: Found {len(winning_strategies)} successful extraction strategies.")
+
+            # 4. Anti-Patterns (Failed Engagements)
+            past_failures = await search_past_failures("scam", limit=3)
+            if past_failures:
+                memory_context["past_failures"] = past_failures
+                logger.warning(f"ZEP WARNING: Found {len(past_failures)} past failures to avoid.")
+                
+            # 5. ROI Logic (Strategic Pruning)
+            from memory.zep_memory import get_scam_stats, get_optimal_traits
+            
+            scam_stats = await get_scam_stats("scam") 
+            memory_context["scam_stats"] = scam_stats
+            logger.info(f"ZEP STATS: Success Rate: {scam_stats['success_rate']:.2f} (n={scam_stats['total_attempts']})")
+            
+            # 6. Dynamic Persona (Optimal Traits)
+            # Use the "Common Type" from the signal to find winning traits
+            detected_type = zep_signal.get("common_type", "scam") 
+            if not detected_type or detected_type == "Unknown":
+                detected_type = "scam"
+                
+            optimal_traits = await get_optimal_traits(detected_type)
+            if optimal_traits:
+                memory_context["persona_traits"] = optimal_traits
+                logger.info(f"ZEP PERSONA: Found optimal traits for '{detected_type}': {optimal_traits}")
+            else:
+                logger.info("ZEP PERSONA: No optimal traits found. Using Cold Start defaults.")
+                # Cold Start Baseline (Exploration Mode)
+                memory_context["persona_traits"] = {
+                    "age": "60+",
+                    "tech_literacy": "low", 
+                    "emotional_state": "confused",
+                    "authority_response": "compliant"
+                }
+
+            # 7. Temporal Pacing (Optimal Turn Count)
+            from memory.zep_memory import get_temporal_stats
+            temporal_stats = await get_temporal_stats(detected_type)
+            memory_context["temporal_stats"] = temporal_stats
+            logger.info(f"ZEP PACING: Average Extraction Turn: {temporal_stats['avg_turns']}")
+
     except Exception as e:
         logger.warning(f"Could not load Zep memory: {e}")
     
@@ -199,8 +255,7 @@ async def run_honeypot_analysis(
         message=message, 
         max_engagements=max_engagements,
         conversation_id=conversation_id,
-        memory_context=memory_context,
-        execution_mode=execution_mode
+        memory_context=memory_context
     )
     
     # Create and run workflow
@@ -222,6 +277,22 @@ async def run_honeypot_analysis(
             logger.info(f"Persisted conversation to Zep session {conversation_id}")
     except Exception as e:
         logger.warning(f"Could not persist to Zep memory: {e}")
+        
+    # 8. Failure Analysis (Anti-Pattern Persistence)
+    try:
+        final_response = final_state.get("final_response", {})
+        entity_count = len(final_response.get("extracted_entities", {}).get("bank_accounts", [])) + \
+                       len(final_response.get("extracted_entities", {}).get("upi_ids", []))
+                       
+        turns_used = final_state.get("engagement_count", 0)
+        
+        # If we engaged significantly (>2 turns) but got NOTHING, log it as a failure.
+        if turns_used >= 3 and entity_count == 0:
+            from memory.zep_memory import add_failure_event
+            await add_failure_event(conversation_id, dict(final_state))
+            
+    except Exception as e:
+        logger.warning(f"Could not persist failure event: {e}")
     
     # Return the final response
     return final_state.get("final_response", {

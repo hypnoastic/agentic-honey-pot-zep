@@ -127,70 +127,44 @@ async def analyze_message(
 ):
     """
     Analyze an incoming message for scam detection and intelligence extraction.
-    
-    The system will:
-    1. Load prior context from Zep memory (if conversation_id provided)
-    2. Detect if the message is a scam attempt
-    3. If scam detected, engage using a believable persona
-    4. Extract bank accounts, UPI IDs, and phishing URLs
-    5. Persist conversation to Zep memory for future context
-    6. Return structured intelligence report
-    
-    Args:
-        request: AnalyzeRequest with the message to analyze
-        api_key: Valid API key (via dependency)
-        
-    Returns:
-        AnalyzeResponse with scam detection results and extracted entities
+    GUARANTEE: Always returns a valid JSON response.
     """
-    # Generate or use provided conversation ID
+    # 1. Generate ID safely
     conversation_id = request.conversation_id or str(uuid.uuid4())
     request_id = conversation_id[:8]
     
-    # Sanitize input
-    message = sanitize_message(request.message)
-    
-    if not message:
-        raise HTTPException(
-            status_code=400,
-            detail="Message cannot be empty"
-        )
-    
-    logger.info(f"[{request_id}] Analyzing message: {message[:100]}...")
-    
     try:
-        # Run the honeypot workflow (Zep memory is handled inside)
+        # 2. Sanitize input
+        message = sanitize_message(request.message)
+        
+        if not message:
+            # Soft failure for empty message
+            from utils.safe_response import create_fallback_response
+            logger.warning(f"[{request_id}] Empty message received")
+            return create_fallback_response(conversation_id, "Message cannot be empty")
+        
+        logger.info(f"[{request_id}] Analyzing message: {message[:100]}...")
+        
+        # 3. Execution (Protected)
+        # Run workflow
         result = await run_honeypot_analysis(
             message=message,
             max_engagements=settings.max_engagement_turns,
-            conversation_id=conversation_id,
-            execution_mode=request.mode
-        )
-        
-        # Construct response
-        response = AnalyzeResponse(
-            is_scam=result.get("is_scam", False),
-            scam_type=result.get("scam_type"),
-            confidence_score=result.get("confidence_score", 0.0),
-            extracted_entities=ExtractedEntities(
-                bank_accounts=result.get("extracted_entities", {}).get("bank_accounts", []),
-                upi_ids=result.get("extracted_entities", {}).get("upi_ids", []),
-                phishing_urls=result.get("extracted_entities", {}).get("phishing_urls", [])
-            ),
-            conversation_summary=result.get("conversation_summary", ""),
-            agent_reply=result.get("final_response", {}).get("agent_response") if request.mode == "live" else None,
             conversation_id=conversation_id
         )
         
-        logger.info(f"[{request_id}] Analysis complete. Is scam: {response.is_scam}, Type: {response.scam_type}")
+        # 4. Safe Construction
+        from utils.safe_response import construct_safe_response
+        response = construct_safe_response(result, conversation_id)
+        
+        logger.info(f"[{request_id}] Analysis complete. Is scam: {response.is_scam}")
         return response
         
     except Exception as e:
-        logger.error(f"[{request_id}] Analysis error: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Analysis failed: {str(e)}"
-        )
+        # 5. Global Error Boundary
+        logger.exception(f"[{request_id}] CRITICAL FAILURE: {str(e)}")
+        from utils.safe_response import create_fallback_response
+        return create_fallback_response(conversation_id, "Internal system error during analysis")
 
 
 @app.get("/")

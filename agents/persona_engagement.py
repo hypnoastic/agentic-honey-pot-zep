@@ -21,6 +21,9 @@ PERSONA_GENERATION_PROMPT = """Analyze the incoming scam message and GENERATE a 
 SCAM MESSAGE: "{message}"
 DETECTED SCAM TYPE: {scam_type}
 
+REQUIRED TRAITS (Optimize for this):
+{traits_instruction}
+
 Create a specific, believable Indian persona (Name, Age, Occupation, etc.).
 - For Bank Scams: Often older people, retired, fearful of authority.
 - For Job Scams: Young students, housewives, or unemployed youth.
@@ -115,46 +118,16 @@ def persona_engagement_agent(state: Dict[str, Any]) -> Dict[str, Any]:
             "turn_number": engagement_count + 1
         })
         
-        # 4. Handle Execution Mode
-        if state.get("execution_mode") == "live":
-            return {
-                "conversation_history": new_history,
-                "engagement_count": engagement_count + 1,
-                "engagement_complete": True,
-                "current_agent": "intelligence_extraction",
-                "final_response": {"agent_response": honeypot_message}
-            }
-
-        # 5. Simulation Mode: Internal Scammer Simulator
-        from utils.scam_simulator import simulator
-        scammer_response = simulator.get_response(
-            state.get("conversation_id", str(uuid.uuid4())),
-            engagement_count + 1,
-            honeypot_message
-        )
         
-        if scammer_response:
-            new_history.append({
-                "role": "scammer",
-                "message": scammer_response.get("message", ""),
-                "turn_number": engagement_count + 1,
-                "revealed_info": scammer_response.get("revealed_info")
-            })
-            
-            if scammer_response.get("conversation_ended"):
-                return {
-                    "conversation_history": new_history,
-                    "engagement_complete": True,
-                    "current_agent": "intelligence_extraction"
-                }
-        
-        next_agent = "persona_engagement" if engagement_count + 1 < max_engagements else "intelligence_extraction"
-        
+        # 4. Return Response (Always Live Mode)
         return {
+            "persona_name": persona.get("name"),       # RETURN PERSONA
+            "persona_context": json.dumps(persona),    # RETURN PERSONA
             "conversation_history": new_history,
             "engagement_count": engagement_count + 1,
-            "engagement_complete": engagement_count + 1 >= max_engagements,
-            "current_agent": next_agent
+            "engagement_complete": True,               # Always complete after one turn in live API
+            "current_agent": "intelligence_extraction",
+            "final_response": {"agent_response": honeypot_message}
         }
         
     except Exception as e:
@@ -170,9 +143,18 @@ def _generate_unique_persona(state: Dict[str, Any]) -> Dict:
     message = state.get("original_message", "")
     scam_type = state.get("scam_type", "Unknown")
     
+    # Format Traits
+    traits = state.get("persona_traits", {})
+    if traits:
+        traits_desc = ", ".join([f"{k}: {v}" for k, v in traits.items()])
+        traits_instruction = f"MUST EMBODY: {traits_desc}"
+    else:
+        traits_instruction = "No specific constraints. Choose cues from the scam message."
+    
     prompt = PERSONA_GENERATION_PROMPT.format(
         message=message,
-        scam_type=scam_type
+        scam_type=scam_type,
+        traits_instruction=traits_instruction
     )
     
     try:

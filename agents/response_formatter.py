@@ -63,6 +63,8 @@ def response_formatter_agent(state: Dict[str, Any]) -> Dict[str, Any]:
             "upi_ids": entities.get("upi_ids", []),
             "phishing_urls": entities.get("phishing_urls", [])
         },
+        "behavioral_signals": state.get("behavioral_signals", []),
+        "confidence_factors": state.get("confidence_factors", {}),
         "conversation_summary": summary
     }
 

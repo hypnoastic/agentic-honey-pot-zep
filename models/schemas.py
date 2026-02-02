@@ -18,10 +18,6 @@ class AnalyzeRequest(BaseModel):
         default=None,
         description="Optional conversation ID for multi-turn memory continuity"
     )
-    mode: str = Field(
-        default="simulation",
-        description="Execution mode: 'simulation' (loops with mock scammer) or 'live' (real-time interaction)"
-    )
 
 
 class ExtractedEntities(BaseModel):
@@ -60,10 +56,15 @@ class AnalyzeResponse(BaseModel):
         default_factory=ExtractedEntities,
         description="Extracted intelligence from scam engagement"
     )
-    conversation_summary: str = Field(
-        default="",
-        description="Concise summary of the scam engagement conversation (Simulation Mode only)"
+    behavioral_signals: List[str] = Field(
+        default_factory=list,
+        description="Psychological triggers identified (e.g. Urgency, Greed)"
     )
+    confidence_factors: dict = Field(
+        default_factory=dict,
+        description="Breakdown of confidence score factors"
+    )
+
     agent_reply: Optional[str] = Field(
         default=None,
         description="The immediate reply to send to the scammer (Live Mode only)"
@@ -72,20 +73,3 @@ class AnalyzeResponse(BaseModel):
         default=None,
         description="Conversation ID for multi-turn continuity (use in subsequent requests)"
     )
-
-
-
-class ScammerMessage(BaseModel):
-    """Message from Mock Scammer API."""
-    message: str = Field(..., description="Scammer's response message")
-    revealed_info: Optional[dict] = Field(
-        default=None,
-        description="Information revealed by scammer in this turn"
-    )
-
-
-class EngagementRequest(BaseModel):
-    """Request to Mock Scammer API for engagement."""
-    victim_message: str = Field(..., description="Message from the honeypot persona")
-    conversation_id: str = Field(..., description="Unique conversation identifier")
-    turn_number: int = Field(..., description="Current turn in the conversation")

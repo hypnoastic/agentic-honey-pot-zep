@@ -31,6 +31,7 @@ class HoneypotState(TypedDict):
     
     # Engagement State
     persona_name: str
+    persona_traits: Dict[str, Any] # New: Dynamic Vector
     persona_context: str
     conversation_history: List[ConversationTurn]
     engagement_count: int
@@ -64,20 +65,25 @@ class HoneypotState(TypedDict):
     # Zep Memory Context (injected from prior conversations)
     prior_context: Optional[str]
     prior_scam_types: List[str]
+    winning_strategies: List[str]
+    past_failures: List[str]
+    scam_stats: Dict[str, Any]
+    temporal_stats: Dict[str, Any]
+    zep_signal: Dict[str, Any]
+    familiarity_score: float
     behavioral_signals: List[str]
     prior_messages: List[Dict[str, Any]]
     zep_enabled: bool
     
     # System Mode
-    execution_mode: str  # "simulation" or "live"
+
 
 
 def create_initial_state(
     message: str, 
     max_engagements: int = 5,
     conversation_id: str = "",
-    memory_context: Optional[Dict[str, Any]] = None,
-    execution_mode: str = "simulation"
+    memory_context: Optional[Dict[str, Any]] = None
 ) -> HoneypotState:
     """
     Create initial state for a new honeypot workflow.
@@ -87,7 +93,6 @@ def create_initial_state(
         max_engagements: Maximum number of engagement turns with scammer
         conversation_id: Unique conversation identifier for Zep session
         memory_context: Pre-loaded memory context from Zep
-        execution_mode: "simulation" (loop with mock) or "live" (single turn)
         
     Returns:
         Initialized HoneypotState
@@ -117,8 +122,9 @@ def create_initial_state(
         scam_indicators=[],
         
         # Engagement
-        persona_name="",
-        persona_context="",
+        persona_name=memory.get("persona_name", ""),
+        persona_traits=memory.get("persona_traits", {}),
+        persona_context=memory.get("persona_context", ""),
         conversation_history=[],
         engagement_count=0,
         max_engagements=max_engagements,
@@ -145,12 +151,15 @@ def create_initial_state(
         error=None,
         
         # Zep Memory Context
-        prior_context=memory.get("conversation_summary", ""),
+    prior_context=memory.get("conversation_summary", ""),
         prior_scam_types=memory.get("prior_scam_types", []),
+        winning_strategies=memory.get("winning_strategies", []),
+        past_failures=memory.get("past_failures", []),
+        scam_stats=memory.get("scam_stats", {}),
+        temporal_stats=memory.get("temporal_stats", {}),
+        zep_signal=memory.get("zep_signal", {}),
+        familiarity_score=memory.get("familiarity_score", 0.0),
         behavioral_signals=memory.get("behavioral_signals", []),
         prior_messages=memory.get("prior_messages", [])[:10],  # Last 10 messages
-        zep_enabled=bool(memory),
-        
-        # System Mode
-        execution_mode=execution_mode
+        zep_enabled=bool(memory)
     )

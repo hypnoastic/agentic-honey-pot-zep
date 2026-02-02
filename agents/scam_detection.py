@@ -54,6 +54,12 @@ SCAM_DETECTION_PROMPT = """You are an expert scam detection system. Analyze the 
 MESSAGE TO ANALYZE:
 {message}
 
+ZEP HISTORICAL SIGNAL (Past Data):
+{zep_signal_text}
+
+CONTEXTUAL INTELLIGENCE (Similar past scams):
+{intelligence_context}
+
 Analyze for these scam indicators:
 1. LOTTERY_FRAUD: Claims of winning prizes, lotteries, or lucky draws
 2. UPI_FRAUD: Requests for UPI payments, processing fees, or advance payments
@@ -70,6 +76,8 @@ Respond ONLY with a valid JSON object in this exact format:
     "scam_type": "TYPE_FROM_ABOVE or null",
     "confidence": 0.0-1.0,
     "indicators": ["list", "of", "specific", "indicators", "found"],
+    "behavioral_signals": ["list", "of", "psychological", "triggers", "e.g. Urgency, Greed"],
+    "confidence_factors": {{"Specific Keyword": 0.0-1.0, "Link Analysis": 0.0-1.0}},
     "reasoning": "Brief explanation of your analysis"
 }}
 
@@ -80,11 +88,29 @@ def scam_detection_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     Analyze the incoming message for scam indicators using OpenAI.
     """
     message = state.get("original_message", "")
+    prior_scams = state.get("prior_scam_types", [])
     
+    # Format intelligence context
+    if prior_scams:
+        intel_ctx = "- " + "\n- ".join(prior_scams[:3])
+    else:
+        intel_ctx = "No specific prior intelligence available."
+    
+    # Format Zep Signal
+    zep_signal = state.get("zep_signal", {})
+    if zep_signal and zep_signal.get("similar_count", 0) > 0:
+        zep_signal_text = f"FOUND {zep_signal['similar_count']} similar past messages. Most common type: {zep_signal['common_type']}."
+    else:
+        zep_signal_text = "No strong historical signal found."
+
     # Sanitize input
     message = _sanitize_input(message)
     
-    prompt = SCAM_DETECTION_PROMPT.format(message=message)
+    prompt = SCAM_DETECTION_PROMPT.format(
+        message=message, 
+        zep_signal_text=zep_signal_text,
+        intelligence_context=intel_ctx
+    )
     
     try:
         response_text = call_llm(
@@ -109,6 +135,8 @@ def scam_detection_agent(state: Dict[str, Any]) -> Dict[str, Any]:
                 "scam_detected": True,
                 "scam_type": scam_type,
                 "scam_indicators": analysis.get("indicators", []),
+                "behavioral_signals": analysis.get("behavioral_signals", []),
+                "confidence_factors": analysis.get("confidence_factors", {}),
                 "confidence_score": confidence,
                 "current_agent": "persona_engagement"
             }
@@ -117,6 +145,8 @@ def scam_detection_agent(state: Dict[str, Any]) -> Dict[str, Any]:
                 "scam_detected": False,
                 "scam_type": None,
                 "scam_indicators": analysis.get("indicators", []),
+                "behavioral_signals": analysis.get("behavioral_signals", []),
+                "confidence_factors": analysis.get("confidence_factors", {}),
                 "confidence_score": confidence,
                 "current_agent": "response_formatter"
             }

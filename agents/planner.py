@@ -21,8 +21,20 @@ CURRENT STATE:
 - Turns Used: {turns_used}/{max_turns}
 - Extracted Entities: {extracted_count}
 
+PACING ADVICE (TEMPORAL LEARNING):
+{temporal_pacing_info}
+
+FAMILIARITY SCORE (SEMANTIC CLUSTERING):
+{familiarity_score:.2f}/1.0. (Logic: <0.6 = NOVEL/EXPLORE, >0.8 = KNOWN/EXECUTE)
+
 CONVERSATION HISTORY (Last 3 turns):
 {recent_history}
+
+WINNING TACTICS (From past successful extractions):
+{winning_strategies}
+
+FAILED STRATEGIES (TO AVOID):
+{past_failures}
 
 LATEST SCAMMER MESSAGE:
 "{latest_message}"
@@ -36,6 +48,7 @@ STRATEGY GUIDELINES:
 - If they ask for money, feign ignorance or technical issues.
 - If they threaten action (police/block), act scared but incompetent.
 - DO NOT JUDGE EARLY. We want to maximize the conversation duration.
+- ADAPT: If a "Winning Tactic" is suggested above, TRY TO INCORPORATE IT.
 
 Respond with JSON ONLY:
 {{
@@ -63,8 +76,79 @@ def planner_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     entities = state.get("extracted_entities", {})
     entity_count = len(entities.get("bank_accounts", [])) + len(entities.get("upi_ids", [])) + len(entities.get("phishing_urls", []))
     
-    max_turns = state.get("max_engagements", 5)
+    max_turns = state.get("max_engagements", 8)
     turns_used = state.get("engagement_count", 0)
+
+    # SMART QUIT LOGIC (Optimization)
+    # If we have gathered intelligence (Entities > 0) AND engaged for at least 3 turns,
+    # we can stop early to save time/cost.
+    if turns_used >= 3 and entity_count > 0:
+        logger.info(f"Smart Quit triggered: Intelligence gathered ({entity_count} entities) after {turns_used} turns.")
+        
+        # Transparent Logging
+        from utils.logger import AgentLogger
+        AgentLogger.plan_decision(
+            current_turn=turns_used,
+            max_turns=max_turns,
+            decision="judge",
+            reasoning="Smart Quit: Sufficient intelligence gathered."
+        )
+        
+        return {
+            "planner_action": "judge",
+            "strategy_hint": "Sufficient intelligence gathered. Proceeding to verdict.",
+            "current_agent": "planner"
+        }
+
+    # ROI Check
+    scam_stats = state.get("scam_stats", {})
+    success_rate = scam_stats.get("success_rate", 0.5)
+    total_attempts = scam_stats.get("total_attempts", 0)
+    
+    # If we have significant data (>5) and success is terrible (<10%)
+    # SKIP ENGAGEMENT to save cost.
+    if total_attempts > 5 and success_rate < 0.10:
+        logger.info(f"ROI Decision: LOW SUCCESS RATE ({success_rate:.2f}). Skipping engagement.")
+        
+        from utils.logger import AgentLogger
+        AgentLogger.plan_decision(
+            current_turn=turns_used,
+            max_turns=max_turns,
+            decision="judge",
+            reasoning=f"ROI PRUNE: Success rate {success_rate:.2f} is too low."
+        )
+        return {
+            "planner_action": "judge",
+            "strategy_hint": "Skipping engagement due to historically low success rate.",
+            "current_agent": "planner"
+        }
+
+    winning_tactics = state.get("winning_strategies", [])
+    if winning_tactics:
+        tactics_str = "- " + "\n- ".join(winning_tactics)
+    else:
+        tactics_str = "No specific past tactics available."
+
+    failures = state.get("past_failures", [])
+    if failures:
+        failures_str = "- " + "\n- ".join(failures)
+    else:
+        failures_str = "No specific failed patterns to avoid."
+
+    # Temporal Pacing Logic
+    temporal = state.get("temporal_stats", {})
+    avg_turns = temporal.get("avg_turns", 4.0)
+    sample_size = temporal.get("sample_size", 0)
+    
+    if sample_size > 2:
+        if turns_used < avg_turns - 1:
+            pacing_info = f"AVG SUCCESS AT TURN {avg_turns}. Currently Turn {turns_used}. ADVICE: STALL. DO NOT EXTRACT YET."
+        elif turns_used >= avg_turns:
+            pacing_info = f"AVG SUCCESS AT TURN {avg_turns}. Currently Turn {turns_used}. ADVICE: GOOD TIME TO EXTRACT."
+        else:
+            pacing_info = f"Approaching optimal extraction turn ({avg_turns}). Prepared to pivot."
+    else:
+        pacing_info = "No historical pacing data available. Use best judgement."
 
     prompt = PLANNER_PROMPT.format(
         scam_detected=state.get("is_scam", False),
@@ -72,7 +156,11 @@ def planner_agent(state: Dict[str, Any]) -> Dict[str, Any]:
         turns_used=turns_used,
         max_turns=max_turns,
         extracted_count=entity_count,
+        temporal_pacing_info=pacing_info,
+        familiarity_score=state.get("familiarity_score", 0.0),
         recent_history=recent_history,
+        winning_strategies=tactics_str,
+        past_failures=failures_str,
         latest_message=last_message
     )
 
@@ -88,6 +176,10 @@ def planner_agent(state: Dict[str, Any]) -> Dict[str, Any]:
         plan = json.loads(response_text)
         action = plan.get("action", "judge")
         hint = plan.get("strategy_hint", "Continue engagement")
+        
+        # Internal Explainability (Trace)
+        trace_id = f"trace_{turns_used}_{scam_stats.get('total_attempts', 0)}"
+        logger.info(f"PLANNER TRACE [{trace_id}]: Selected {action} based on {len(winning_tactics)} winning strategies and {len(failures)} failures.")
         
         # Transparent Logging
         from utils.logger import AgentLogger

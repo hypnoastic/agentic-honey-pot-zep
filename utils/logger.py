@@ -1,65 +1,135 @@
 """
-Transparent Logging System
-Provides standardized, visual logging for Agentic Honey-Pot.
-Uses text tags and structured formats to make agent reasoning visible.
+Transparent Logging System (Visual Edition)
+Provides standardized, color-coded logging for Agentic Honey-Pot.
+Uses 'colorlog' to create a visual hierarchy of agent actions.
 """
 
 import logging
 import sys
+import colorlog
 
-# Configure standard logger
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)]
-)
+# Define distinctive colors for each agent/action type
+LOG_COLORS = {
+    'DEBUG':    'cyan',
+    'INFO':     'white',
+    'WARNING':  'yellow',
+    'ERROR':    'red',
+    'CRITICAL': 'red,bg_white',
+    
+    # Custom Agent Colors (mapped via logger names or usage)
+    'SCAM_ANALYSIS': 'red',     # Critical Alert
+    'THOUGHT':       'blue',    # Internal Monologue
+    'PLANNER':       'purple',  # Strategy
+    'PERSONA':       'cyan',    # Roleplay
+    'REPLY':         'green',   # Output to user
+    'INTELLIGENCE':  'yellow',  # Data extraction
+    'JUDGE':         'bold_red',# Final Verdict
+    'ZEP':           'magenta'  # Memory
+}
 
 class AgentLogger:
-    """Helper class for consistent, transparent agent logging."""
+    """Helper class for consistent, colored agent logging."""
     
+    _configured = False
+    
+    @classmethod
+    def configure(cls):
+        """Setup global logger configuration if not already done."""
+        if cls._configured: return
+        
+        handler = colorlog.StreamHandler()
+        handler.setFormatter(colorlog.ColoredFormatter(
+            '%(log_color)s%(asctime)s | %(message)s',
+            datefmt='%H:%M:%S',
+            log_colors=LOG_COLORS,
+            secondary_log_colors={},
+            style='%'
+        ))
+        
+        logger = colorlog.getLogger()
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+        
+        # Silence other noisy loggers
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        logging.getLogger("httpcore").setLevel(logging.WARNING)
+        
+        cls._configured = True
+
     @staticmethod
-    def _print(tag: str, agent: str, title: str, details: str = ""):
-        """Internal format for log messages."""
-        msg = f"[{tag}] [{agent}] {title}"
+    def _print_colored(tag: str, color: str, icon: str, title: str, details: str = ""):
+        """Internal format for colored log messages."""
+        # We manually construct the colored string using colorlog's escape codes
+        # But efficiently, we just use the root logger with a prefix that colorlog could handle if mapped
+        # Simpler approach: Use the 'extra' dict if we had custom formatters, 
+        # but for direct control we can print formatted strings if we want distinct colors per line.
+        
+        # For simplicity in this specialized logger, we will use specific loggers 
+        # that we can map colors to via the `extra` fields or just relying on the text structure.
+        
+        # Let's use a simpler visual format:
+        # [ICON TAG] TITLE: Details
+        
+        # We'll use color codes strictly for the TAG to make it pop.
+        
+        RESET = "\033[0m"
+        COLORS = {
+            'red': "\033[91m", 'green': "\033[92m", 'yellow': "\033[93m",
+            'blue': "\033[94m", 'purple': "\033[95m", 'cyan': "\033[96m", 'white': "\033[97m",
+            'bold_red': "\033[1;91m", 'magenta': "\033[35m"
+        }
+        
+        c = COLORS.get(color, "\033[97m")
+        
         if details:
-            msg += f": {details}"
-        # We use the root logger to ensure it appears in Uvicorn logs
-        logging.getLogger(f"behavior.{agent.lower()}").info(msg)
+            msg = f"{c}{icon} [{tag}] {title}: {RESET}{details}"
+        else:
+            msg = f"{c}{icon} [{tag}] {title}{RESET}"
+            
+        # We print directly to stdout to ensure color preservation across all terminals
+        # independent of the root logger's formatting for these specific agent events.
+        print(msg)
+        
+        # Also log to file/system logger (stripped of color codes for purity if needed, but we keep simple)
+        # logging.info(msg) # Avoid double printing if using StreamHandler
 
     @staticmethod
     def scam_detected(probability: float, reason: str):
         outcome = "DETECTED" if probability > 0.6 else "CLEAN"
-        AgentLogger._print("SCAM_ANALYSIS", "ScamDetector", f"Analysis Complete ({outcome})", f"Confidence: {probability:.2f} | Reason: {reason}")
+        color = 'bold_red' if probability > 0.6 else 'green'
+        AgentLogger._print_colored("SCAM", color, f"Analysis: {outcome}", f"{probability:.0%}")
 
     @staticmethod
     def thought_process(agent: str, thought: str):
-        AgentLogger._print("THOUGHT", agent, "Thinking", thought)
+        AgentLogger._print_colored(f"{agent.upper()}", "blue", "Thinking", thought[:200] + "..." if len(thought) > 200 else thought)
         
     @staticmethod
     def plan_decision(current_turn: int, max_turns: int, decision: str, reasoning: str):
-        AgentLogger._print("STRATEGY", "Planner", f"Decision: {decision.upper()}", f"Turns: {current_turn}/{max_turns} | Reason: {reasoning}")
+        AgentLogger._print_colored("PLANNER", "purple", f"Strategy: {decision.upper()}", f"Turn {current_turn}/{max_turns}")
 
     @staticmethod
     def persona_update(name: str, role: str, action: str):
-        AgentLogger._print("PERSONA", "Persona", f"Identity: {name} ({role})", action)
+        AgentLogger._print_colored("PERSONA", "cyan", f"Identity", f"{name} ({role})")
 
     @staticmethod
     def response_generated(response: str):
-        preview = response[:100] + "..." if len(response) > 100 else response
-        AgentLogger._print("RESPONSE", "Persona", "Generated Response", f'"{preview}"')
+        preview = response[:80] + "..." if len(response) > 80 else response
+        AgentLogger._print_colored("REPLY", "green", "Sent", f'"{preview}"')
 
     @staticmethod
     def extraction_result(entities: dict):
-        # Only count items in known list fields
-        target_keys = ["bank_accounts", "upi_ids", "phishing_urls"]
-        count = 0
-        for k in target_keys:
-            if k in entities and isinstance(entities[k], list):
-                count += len(entities[k])
+        found = []
+        for k, v in entities.items():
+            if k in ["bank_accounts", "upi_ids", "phishing_urls"] and v:
+                found.append(f"{k}={len(v)}")
         
-        AgentLogger._print("INTELLIGENCE", "Extractor", f"Extracted ({count} entities)", str(entities))
+        if found:
+            AgentLogger._print_colored("INTELLIGENCE", "yellow", "Extracted", ", ".join(found))
+        else:
+            AgentLogger._print_colored("INTELLIGENCE", "white", "No Entites", "")
 
     @staticmethod
     def verdict(is_guilty: bool, confidence: float, reasoning: str):
         verdict_str = "GUILTY" if is_guilty else "INNOCENT"
-        AgentLogger._print("VERDICT", "Judge", f"Final Verdict: {verdict_str}", f"Confidence: {confidence:.2f} | {reasoning}")
+        color = 'bold_red' if is_guilty else 'green'
+        AgentLogger._print_colored("JUDGE", color, "⚖️ ", f"Verdict: {verdict_str}", f"{confidence:.0%} | {reasoning}")
