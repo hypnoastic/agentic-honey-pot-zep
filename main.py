@@ -182,6 +182,16 @@ async def analyze_message(
         return create_fallback_response(conversation_id, "Internal system error during analysis")
 
 
+@app.get("/analyze")
+async def analyze_get():
+    """Compatibility endpoint for testers checking existence via GET."""
+    return {"status": "ready", "message": "Send POST request to analyze"}
+
+@app.post("/")
+async def root_post(request: Request):
+    """Compatibility endpoint for testers posting to root."""
+    return {"status": "ready", "message": "Please use /analyze endpoint"}
+
 @app.get("/")
 async def root():
     """Root endpoint with API information."""
