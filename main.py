@@ -7,6 +7,7 @@ Includes Zep Context AI memory integration for persistent conversational context
 import uuid
 import logging
 from contextlib import asynccontextmanager
+from typing import Dict, Any, List, Optional
 from fastapi import FastAPI, HTTPException, Header, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 
