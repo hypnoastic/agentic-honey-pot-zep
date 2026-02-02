@@ -19,6 +19,9 @@ class AnalyzeRequest(BaseModel):
         description="Optional conversation ID for multi-turn memory continuity"
     )
 
+    class Config:
+        extra = "ignore"
+
 
 class ExtractedEntities(BaseModel):
     """Extracted intelligence entities from scam interaction."""
