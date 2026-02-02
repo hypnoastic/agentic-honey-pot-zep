@@ -75,7 +75,7 @@ async def log_request_body(request: Request, call_next):
     return response
 
 
-async def verify_api_key(x_api_key: str = Header(..., description="API Key for authentication")):
+async def verify_api_key(x_api_key: Optional[str] = Header(None, description="API Key for authentication")):
     """
     Dependency to verify the x-api-key header.
     

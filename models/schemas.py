@@ -8,10 +8,9 @@ from pydantic import BaseModel, Field
 
 class AnalyzeRequest(BaseModel):
     """Request schema for the /analyze endpoint."""
-    message: str = Field(
-        ...,
+    message: Optional[str] = Field(
+        default="",
         description="The incoming message to analyze for scam detection",
-        min_length=1,
         max_length=10000
     )
     conversation_id: Optional[str] = Field(
