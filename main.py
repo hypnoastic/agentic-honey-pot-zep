@@ -137,13 +137,32 @@ async def health_check():
     description="Analyzes incoming message for scam indicators and extracts intelligence through simulated engagement. Supports multi-turn memory via conversation_id."
 )
 async def analyze_message(
-    request: AnalyzeRequest,
+    raw_request: Request,
     api_key: str = Depends(verify_api_key)
 ):
     """
     Analyze an incoming message for scam detection and intelligence extraction.
     GUARANTEE: Always returns a valid JSON response.
     """
+    # Manual Body Parsing to handle Empty/Malformed input
+    try:
+        body_bytes = await raw_request.body()
+        if not body_bytes:
+            data = {}
+        else:
+            try:
+                data = await raw_request.json()
+            except Exception:
+                # Handle invalid JSON (e.g. plain text)
+                data = {"message": body_bytes.decode(errors="ignore")}
+    except Exception:
+        data = {}
+
+    # Construct request object manually from safe dict
+    request = AnalyzeRequest(
+        message=data.get("message", ""),
+        conversation_id=data.get("conversation_id")
+    )
     # 1. Generate ID safely
     conversation_id = request.conversation_id or str(uuid.uuid4())
     request_id = conversation_id[:8]
