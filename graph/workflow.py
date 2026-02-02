@@ -8,9 +8,10 @@ from langgraph.graph import StateGraph, END
 
 from graph.state import HoneypotState, create_initial_state
 from agents.scam_detection import scam_detection_agent
+from agents.planner import planner_agent
 from agents.persona_engagement import persona_engagement_agent
 from agents.intelligence_extraction import intelligence_extraction_agent
-from agents.confidence_scoring import confidence_scoring_agent
+from agents.judge import agentic_judge_agent
 from agents.response_formatter import response_formatter_agent
 
 
@@ -18,118 +19,147 @@ def create_honeypot_workflow() -> StateGraph:
     """
     Create the LangGraph workflow for the honeypot system.
     
-    Flow:
-    1. Scam Detection → (if scam) Persona Engagement → Intelligence Extraction
-                      → (if not scam) Response Formatter
-    2. Persona Engagement loops until max turns or extraction complete
-    3. Intelligence Extraction → Confidence Scoring → Response Formatter
-    
-    Returns:
-        Compiled StateGraph workflow
+    New Flow (Agentic):
+    1. Scam Detection -> Planner
+    2. Planner -> (Engage | Judge | End)
+    3. Engage -> Persona -> Extraction -> Planner
+    4. Judge -> Response Formatter
     """
     
     # Create the graph
     workflow = StateGraph(HoneypotState)
     
-    # Add nodes for each agent
+    # Add nodes
     workflow.add_node("scam_detection", _scam_detection_node)
+    workflow.add_node("planner", _planner_node)
     workflow.add_node("persona_engagement", _persona_engagement_node)
     workflow.add_node("intelligence_extraction", _intelligence_extraction_node)
-    workflow.add_node("confidence_scoring", _confidence_scoring_node)
+    workflow.add_node("agentic_judge", _agentic_judge_node)
     workflow.add_node("response_formatter", _response_formatter_node)
     
     # Set entry point
     workflow.set_entry_point("scam_detection")
     
-    # Add conditional edges from scam_detection
+    # Edge: Detection -> Planner
+    workflow.add_edge("scam_detection", "planner")
+    
+    # Conditional Edge: Planner -> Next Step
     workflow.add_conditional_edges(
-        "scam_detection",
-        _route_after_detection,
+        "planner",
+        _route_from_planner,
         {
             "engage": "persona_engagement",
-            "format": "response_formatter"
+            "judge": "agentic_judge",
+            "end": "response_formatter"
         }
     )
     
-    # Add conditional edges from persona_engagement
+    # Conditional Edge from Intelligence Extraction
+    # Live Mode: Exit to Formatter (Single Turn)
+    # Simulation: Loop back to Planner
     workflow.add_conditional_edges(
-        "persona_engagement",
-        _route_after_engagement,
+        "intelligence_extraction",
+        _route_after_extraction,
         {
-            "continue": "persona_engagement",
-            "extract": "intelligence_extraction"
+            "loop": "planner",
+            "exit": "response_formatter"
         }
     )
     
-    # Linear flow for remaining nodes
-    workflow.add_edge("intelligence_extraction", "confidence_scoring")
-    workflow.add_edge("confidence_scoring", "response_formatter")
+    # Loop: Engagement -> Extraction
+    workflow.add_edge("persona_engagement", "intelligence_extraction")
+    
+    # Edge: Judge -> Formatter
+    workflow.add_edge("agentic_judge", "response_formatter")
+    
+    # Edge: Formatter -> End
     workflow.add_edge("response_formatter", END)
     
     return workflow.compile()
 
 
 def _scam_detection_node(state: HoneypotState) -> HoneypotState:
-    """Execute scam detection agent."""
     result = scam_detection_agent(dict(state))
     return {**state, **result}
 
+def _planner_node(state: HoneypotState) -> HoneypotState:
+    result = planner_agent(dict(state))
+    return {**state, **result}
 
 def _persona_engagement_node(state: HoneypotState) -> HoneypotState:
-    """Execute persona engagement agent."""
+    # Inject strategy hint from planner
+    state["strategy_hint"] = state.get("strategy_hint", "")
     result = persona_engagement_agent(dict(state))
     return {**state, **result}
 
-
 def _intelligence_extraction_node(state: HoneypotState) -> HoneypotState:
-    """Execute intelligence extraction agent."""
     result = intelligence_extraction_agent(dict(state))
     return {**state, **result}
 
-
-def _confidence_scoring_node(state: HoneypotState) -> HoneypotState:
-    """Execute confidence scoring agent."""
-    result = confidence_scoring_agent(dict(state))
+def _agentic_judge_node(state: HoneypotState) -> HoneypotState:
+    result = agentic_judge_agent(dict(state))
     return {**state, **result}
 
-
 def _response_formatter_node(state: HoneypotState) -> HoneypotState:
-    """Execute response formatter agent."""
     result = response_formatter_agent(dict(state))
     return {**state, **result}
 
 
-def _route_after_detection(state: HoneypotState) -> Literal["engage", "format"]:
-    """
-    Route based on scam detection result.
-    If scam detected, engage with persona. Otherwise, format response directly.
-    """
-    if state.get("scam_detected", False):
-        return "engage"
-    return "format"
+def _route_from_planner(state: HoneypotState) -> Literal["engage", "judge", "end"]:
+    """Route based on Planner's decision."""
+    action = state.get("planner_action", "judge")
+    
+    # Safety Check: If max turns reached, force judge
+    count = state.get("engagement_count", 0)
+    max_turns = state.get("max_engagements", 5)
+    
+    if count >= max_turns and action == "engage":
+        return "judge"
+        
+    # In Live Mode, we break the loop after one engagement cycle
+    # But the Planner is smart now.
+    # If Planner says "engage", we go Engage -> Extract -> Planner.
+    # The Loop logic handles the "Live Mode Single Turn" exit inside Schema/API response,
+    # BUT we need to ensure we don't loop infinitely in a single API call if logic is weird.
+    # Actually, for Live Mode, we want: Detection -> Planner -> Engage -> Extract -> Formatter -> EXIT.
+    # We shouldn't loop back to Planner in Live Mode?
+    # Correct. In LIVE mode, we do ONE step.
+    
+    if state.get("execution_mode") == "live":
+        if action == "engage":
+            return "engage"
+        elif action == "judge":
+            return "judge"
+        else:
+            return "end"
+
+    return action
 
 
-def _route_after_engagement(state: HoneypotState) -> Literal["continue", "extract"]:
+def _route_after_engagement(state: HoneypotState):
+    # This logic is now handled by the Planner loop
+    pass
+
+def _route_after_extraction(state: HoneypotState) -> Literal["loop", "exit"]:
     """
-    Route based on engagement state.
-    Continue engagement if not complete and under max turns.
+    Route after intelligence extraction.
+    Live Mode: Exit loop (Single Turn).
+    Simulation Mode: Loop back to Planner.
     """
+    if state.get("execution_mode") == "live":
+        return "exit"
+        
     if state.get("engagement_complete", False):
-        return "extract"
-    
-    engagement_count = state.get("engagement_count", 0)
-    max_engagements = state.get("max_engagements", 5)
-    
-    if engagement_count < max_engagements:
-        return "continue"
-    
-    return "extract"
+        return "exit"
+        
+    return "loop"
 
 
 async def run_honeypot_analysis(
     message: str, 
     max_engagements: int = 5,
-    conversation_id: Optional[str] = None
+    conversation_id: Optional[str] = None,
+    execution_mode: str = "simulation"
 ) -> Dict[str, Any]:
     """
     Run the complete honeypot analysis workflow with Zep memory.
@@ -138,6 +168,7 @@ async def run_honeypot_analysis(
         message: The incoming message to analyze
         max_turns: Maximum engagement turns with scammer
         conversation_id: Optional conversation ID for memory continuity
+        execution_mode: "simulation" or "live"
         
     Returns:
         Final analysis response
@@ -168,7 +199,8 @@ async def run_honeypot_analysis(
         message=message, 
         max_engagements=max_engagements,
         conversation_id=conversation_id,
-        memory_context=memory_context
+        memory_context=memory_context,
+        execution_mode=execution_mode
     )
     
     # Create and run workflow

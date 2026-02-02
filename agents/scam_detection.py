@@ -1,29 +1,17 @@
 """
 Scam Detection Agent
-Uses Google Gemini to analyze incoming messages for scam indicators.
+Uses OpenAI to analyze incoming messages for scam indicators.
 Includes error handling, retry logic, and input sanitization.
 """
 
 import json
-import time
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any
+from utils.llm_client import call_llm
 from config import get_settings
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
-
-# Initialize Gemini client
-_client = None
-
-def _get_gemini_client():
-    """Get or create Gemini client."""
-    global _client
-    if _client is None and settings.google_api_key:
-        from google import genai
-        _client = genai.Client(api_key=settings.google_api_key)
-    return _client
-
 
 def _sanitize_input(message: str) -> str:
     """Sanitize input to prevent prompt injection."""
@@ -35,31 +23,6 @@ def _sanitize_input(message: str) -> str:
     message = message.replace("USER:", "")
     message = message.replace("ASSISTANT:", "")
     return message.strip()
-
-
-def _call_gemini_with_retry(client, prompt: str, max_retries: int = None) -> Optional[str]:
-    """Call Gemini API with exponential backoff retry."""
-    max_retries = max_retries or settings.api_retry_attempts
-    
-    for attempt in range(max_retries):
-        try:
-            response = client.models.generate_content(
-                model=settings.gemini_model,
-                contents=prompt
-            )
-            return response.text.strip()
-        except Exception as e:
-            error_str = str(e)
-            if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
-                wait_time = (2 ** attempt) + 1
-                logger.warning(f"Rate limited, waiting {wait_time}s (attempt {attempt + 1}/{max_retries})")
-                time.sleep(wait_time)
-            else:
-                logger.error(f"Gemini API error: {e}")
-                raise
-    
-    raise RuntimeError(f"Failed after {max_retries} retry attempts")
-
 
 def _parse_json_safely(response_text: str) -> Dict[str, Any]:
     """Safely parse JSON response with fallback handling."""
@@ -85,7 +48,6 @@ def _parse_json_safely(response_text: str) -> Dict[str, Any]:
             "indicators": [],
             "reasoning": "Failed to parse AI response"
         }
-
 
 SCAM_DETECTION_PROMPT = """You are an expert scam detection system. Analyze the following message and determine if it is a scam attempt.
 
@@ -113,40 +75,39 @@ Respond ONLY with a valid JSON object in this exact format:
 
 Important: Respond ONLY with the JSON, no other text."""
 
-
 def scam_detection_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Analyze the incoming message for scam indicators using Gemini.
-    
-    Args:
-        state: Current workflow state
-        
-    Returns:
-        Updated state with scam detection results
+    Analyze the incoming message for scam indicators using OpenAI.
     """
     message = state.get("original_message", "")
     
     # Sanitize input
     message = _sanitize_input(message)
     
-    client = _get_gemini_client()
-    if not client:
-        raise RuntimeError("Gemini API client not initialized. Please set GOOGLE_API_KEY in .env")
-    
     prompt = SCAM_DETECTION_PROMPT.format(message=message)
     
     try:
-        response_text = _call_gemini_with_retry(client, prompt)
+        response_text = call_llm(
+            prompt=prompt,
+            system_instruction="You are an expert scam detection AI.",
+            json_mode=True
+        )
+        
         analysis = _parse_json_safely(response_text)
         
         is_scam = analysis.get("is_scam", False)
         confidence = float(analysis.get("confidence", 0.0))
+        scam_type = analysis.get("scam_type")
+        
+        # Transparent Logging
+        from utils.logger import AgentLogger
+        AgentLogger.scam_detected(confidence, f"Type: {scam_type}, IsScam: {is_scam}") # Added AgentLogger call
         
         # Check against threshold
         if is_scam and confidence >= settings.scam_detection_threshold:
             return {
                 "scam_detected": True,
-                "scam_type": analysis.get("scam_type"),
+                "scam_type": scam_type,
                 "scam_indicators": analysis.get("indicators", []),
                 "confidence_score": confidence,
                 "current_agent": "persona_engagement"

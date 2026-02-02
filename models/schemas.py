@@ -18,7 +18,10 @@ class AnalyzeRequest(BaseModel):
         default=None,
         description="Optional conversation ID for multi-turn memory continuity"
     )
-
+    mode: str = Field(
+        default="simulation",
+        description="Execution mode: 'simulation' (loops with mock scammer) or 'live' (real-time interaction)"
+    )
 
 
 class ExtractedEntities(BaseModel):
@@ -59,7 +62,11 @@ class AnalyzeResponse(BaseModel):
     )
     conversation_summary: str = Field(
         default="",
-        description="Concise summary of the scam engagement conversation"
+        description="Concise summary of the scam engagement conversation (Simulation Mode only)"
+    )
+    agent_reply: Optional[str] = Field(
+        default=None,
+        description="The immediate reply to send to the scammer (Live Mode only)"
     )
     conversation_id: Optional[str] = Field(
         default=None,

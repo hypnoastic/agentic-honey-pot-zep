@@ -27,9 +27,8 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
-    logger.info("🍯 Agentic Honey-Pot API starting up...")
-    logger.info(f"Gemini Model: {settings.gemini_model}")
-    logger.info(f"Mock Scammer API enabled: {settings.mock_scammer_enabled}")
+    logger.info("Agentic Honey-Pot API starting up (OpenAI Edition)...")
+    logger.info(f"OpenAI Model: {settings.openai_model}")
     logger.info(f"Max engagement turns: {settings.max_engagement_turns}")
     
     # Log Zep status
@@ -37,7 +36,7 @@ async def lifespan(app: FastAPI):
     logger.info(f"Zep Context AI Memory: {zep_status}")
     
     yield
-    logger.info("🍯 Agentic Honey-Pot API shutting down...")
+    logger.info("Agentic Honey-Pot API shutting down...")
 
 
 app = FastAPI(
@@ -104,14 +103,14 @@ async def health_check():
     try:
         from memory.zep_memory import is_zep_available
         zep_available = is_zep_available()
-    except:
+    except ImportError:
         pass
     
     return {
         "status": "healthy",
         "service": "agentic-honeypot-api",
         "version": "1.1.0",
-        "gemini_model": settings.gemini_model,
+        "openai_model": settings.openai_model,
         "zep_memory": "enabled" if zep_available else "disabled"
     }
 
@@ -164,7 +163,8 @@ async def analyze_message(
         result = await run_honeypot_analysis(
             message=message,
             max_engagements=settings.max_engagement_turns,
-            conversation_id=conversation_id
+            conversation_id=conversation_id,
+            execution_mode=request.mode
         )
         
         # Construct response
@@ -178,6 +178,7 @@ async def analyze_message(
                 phishing_urls=result.get("extracted_entities", {}).get("phishing_urls", [])
             ),
             conversation_summary=result.get("conversation_summary", ""),
+            agent_reply=result.get("final_response", {}).get("agent_response") if request.mode == "live" else None,
             conversation_id=conversation_id
         )
         
@@ -199,11 +200,11 @@ async def root():
         "name": "Agentic Honey-Pot API",
         "version": "1.1.0",
         "description": "Multi-agent scam detection and intelligence extraction with Zep memory",
-        "gemini_model": settings.gemini_model,
+        "model_provider": "OpenAI",
         "features": {
             "zep_memory": "Persistent conversational memory for multi-turn context",
             "multi_agent": "LangGraph-orchestrated agent pipeline",
-            "gemini_ai": "Google Gemini for scam detection and engagement"
+            "scam_detection": "Advanced LLM-based scam analysis"
         },
         "endpoints": {
             "analyze": "POST /analyze - Analyze message for scams",

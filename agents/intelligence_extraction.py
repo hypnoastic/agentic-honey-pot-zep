@@ -1,53 +1,17 @@
 """
 Intelligence Extraction Agent
 Extracts bank accounts, UPI IDs, and phishing URLs from conversation history.
-Uses Gemini for intelligent extraction with error handling and retry logic.
+Uses OpenAI for intelligent extraction with error handling and retry logic.
 """
 
 import json
-import time
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any
+from utils.llm_client import call_llm
 from config import get_settings
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
-
-# Initialize Gemini client
-_client = None
-
-def _get_gemini_client():
-    """Get or create Gemini client."""
-    global _client
-    if _client is None and settings.google_api_key:
-        from google import genai
-        _client = genai.Client(api_key=settings.google_api_key)
-    return _client
-
-
-def _call_gemini_with_retry(client, prompt: str, max_retries: int = None) -> Optional[str]:
-    """Call Gemini API with exponential backoff retry."""
-    max_retries = max_retries or settings.api_retry_attempts
-    
-    for attempt in range(max_retries):
-        try:
-            response = client.models.generate_content(
-                model=settings.gemini_model,
-                contents=prompt
-            )
-            return response.text.strip()
-        except Exception as e:
-            error_str = str(e)
-            if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
-                wait_time = (2 ** attempt) + 1
-                logger.warning(f"Rate limited, waiting {wait_time}s (attempt {attempt + 1}/{max_retries})")
-                time.sleep(wait_time)
-            else:
-                logger.error(f"Gemini API error: {e}")
-                raise
-    
-    raise RuntimeError(f"Failed after {max_retries} retry attempts")
-
 
 def _parse_json_safely(response_text: str) -> Dict[str, Any]:
     """Safely parse JSON response with fallback handling."""
@@ -97,17 +61,8 @@ Respond with ONLY a valid JSON object:
 
 def intelligence_extraction_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Extract intelligence entities from conversation history using Gemini.
-    
-    Args:
-        state: Current workflow state
-        
-    Returns:
-        Updated state with extracted entities
+    Extract intelligence entities from conversation history using OpenAI.
     """
-    client = _get_gemini_client()
-    if not client:
-        raise RuntimeError("Gemini API client not initialized. Please set GOOGLE_API_KEY in .env")
     
     conversation_history = state.get("conversation_history", [])
     original_message = state.get("original_message", "")
@@ -124,21 +79,24 @@ def intelligence_extraction_agent(state: Dict[str, Any]) -> Dict[str, Any]:
             all_text += f"[Revealed Info: {json.dumps(revealed)}]\n"
     
     try:
-        # Extract using Gemini
+        # Extract using OpenAI
         prompt = EXTRACTION_PROMPT.format(conversation=all_text[:8000])  # Limit context
-        response_text = _call_gemini_with_retry(client, prompt)
-        result = _parse_json_safely(response_text)
+        response_text = call_llm(
+            prompt=prompt,
+            system_instruction="You are an expert intelligence extractor.",
+            json_mode=True
+        )
         
-        extracted = {
-            "bank_accounts": result.get("bank_accounts", []),
-            "upi_ids": result.get("upi_ids", []),
-            "phishing_urls": result.get("phishing_urls", [])
-        }
+        extracted_data = _parse_json_safely(response_text) # Replaced json.loads with _parse_json_safely
+        
+        # Transparent Logging
+        from utils.logger import AgentLogger
+        AgentLogger.extraction_result(extracted_data)
         
         return {
-            "extracted_entities": extracted,
+            "extracted_entities": extracted_data,
             "extraction_complete": True,
-            "current_agent": "confidence_scoring"
+            "current_agent": "agentic_judge" # Updated from "confidence_scoring"
         }
         
     except Exception as e:
@@ -151,6 +109,6 @@ def intelligence_extraction_agent(state: Dict[str, Any]) -> Dict[str, Any]:
                 "phishing_urls": []
             },
             "extraction_complete": True,
-            "current_agent": "confidence_scoring",
+            "current_agent": "agentic_judge", # Updated from "confidence_scoring"
             "error": str(e)
         }

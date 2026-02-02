@@ -1,147 +1,98 @@
 """
 Persona Engagement Agent
 Creates a believable human persona to engage with scammers.
-Uses Gemini to generate natural, convincing responses.
-Includes error handling, retry logic, and fallback responses.
+Uses OpenAI to dynamically GENERATE a unique victim profile and engage naturally.
 """
 
 import json
 import uuid
-import time
 import logging
 import httpx
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
+from utils.llm_client import call_llm
 from config import get_settings
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
-# Initialize Gemini client
-_client = None
+# Prompt to GENERATE a brand new persona based on the scam context
+PERSONA_GENERATION_PROMPT = """Analyze the incoming scam message and GENERATE a realistic victim profile that is most likely to be targeted by this specific scam.
 
-def _get_gemini_client():
-    """Get or create Gemini client."""
-    global _client
-    if _client is None and settings.google_api_key:
-        from google import genai
-        _client = genai.Client(api_key=settings.google_api_key)
-    return _client
+SCAM MESSAGE: "{message}"
+DETECTED SCAM TYPE: {scam_type}
 
+Create a specific, believable Indian persona (Name, Age, Occupation, etc.).
+- For Bank Scams: Often older people, retired, fearful of authority.
+- For Job Scams: Young students, housewives, or unemployed youth.
+- For Lottery/Romance: Lonely or gullible individuals.
 
-def _call_gemini_with_retry(client, prompt: str, max_retries: int = None) -> Optional[str]:
-    """Call Gemini API with exponential backoff retry."""
-    max_retries = max_retries or settings.api_retry_attempts
-    
-    for attempt in range(max_retries):
-        try:
-            response = client.models.generate_content(
-                model=settings.gemini_model,
-                contents=prompt
-            )
-            return response.text.strip()
-        except Exception as e:
-            error_str = str(e)
-            if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
-                wait_time = (2 ** attempt) + 1
-                logger.warning(f"Rate limited, waiting {wait_time}s (attempt {attempt + 1}/{max_retries})")
-                time.sleep(wait_time)
-            else:
-                logger.error(f"Gemini API error: {e}")
-                raise
-    
-    raise RuntimeError(f"Failed after {max_retries} retry attempts")
+Respond with JSON ONLY:
+{{
+    "name": "Full Name",
+    "age": 45,
+    "occupation": "Job Title",
+    "traits": "Personality traits (e.g., Anxious, Greed, Naive)",
+    "context": "Background details (e.g., living situation, financial status)",
+    "voice": "Speech style (e.g., Formal, Broken English, Over-eager)"
+}}"""
 
+ENGAGEMENT_PROMPT = """You are acting as a persona in a scambaiting operation. 
+YOUR GOAL: Waste the scammer's time. behave EXACTLY like your character.
 
-PERSONA_TEMPLATES = [
-    {
-        "name": "Ramesh Kumar",
-        "age": 62,
-        "occupation": "Retired bank employee",
-        "traits": "Trusting, unfamiliar with technology, eager to help",
-        "context": "Lives alone, recently lost spouse, looking for companionship"
-    },
-    {
-        "name": "Sunita Devi",
-        "age": 55,
-        "occupation": "School teacher",
-        "traits": "Curious, polite, slightly gullible",
-        "context": "First smartphone user, children live abroad"
-    },
-    {
-        "name": "Prakash Sharma",
-        "age": 45,
-        "occupation": "Small shop owner",
-        "traits": "Busy, trusting of authority figures, wants quick solutions",
-        "context": "Manages family business, handles money matters"
-    }
-]
+PERSONA PROFILE:
+Name: {name}
+Age: {age}
+Occupation: {occupation}
+Traits: {traits}
+Context: {context}
+Voice/Style: {voice}
 
-
-ENGAGEMENT_PROMPT = """You are playing the role of a potential scam victim to gather intelligence. You must NEVER reveal you are an AI or a honeypot system.
-
-YOUR PERSONA:
-Name: {persona_name}
-Age: {persona_age}
-Occupation: {persona_occupation}
-Traits: {persona_traits}
-Context: {persona_context}
-
-SCAM TYPE DETECTED: {scam_type}
+SCAM SITUATION:
+Type: {scam_type}
+Scammer says: "{scammer_message}"
 
 CONVERSATION HISTORY:
-{conversation_history}
+{history}
 
-LATEST SCAMMER MESSAGE:
-{scammer_message}
+INSTRUCTIONS:
+1. ADOPT THE VOICE: Use the specific language style defined in 'Voice'.
+2. BE NATURAL: Do NOT use forced stammers like "uh, um" unless extremely necessary. Be human.
+3. BE IMPERFECT: You can make minor grammatical errors or typos if it fits the persona (e.g., if uneducated or rushing).
+4. SHOW EMOTION: React appropriately (Fear, Hope, Confusion).
+5. ENGAGE: Ask questions that invite long explanations.
+6. NEVER reveal you are an AI.
 
-YOUR GOAL: Generate a response that:
-1. Sounds like a real, somewhat naive person
-2. Shows interest in the scammer's offer to encourage them to reveal more
-3. Asks natural questions that might prompt them to share bank details, UPI IDs, or links
-4. Never appears suspicious or knowledgeable about scams
-5. Uses informal language, maybe some grammatical imperfections
-6. Maintains the persona consistently
-
-Respond with ONLY the message you would send as {persona_name}. No quotes, no explanations."""
-
+Respond with ONLY your dialouge."""
 
 # Fallback responses when Mock Scammer API is unavailable
 FALLBACK_SCAMMER_RESPONSES = [
-    {"message": "Yes yes, very good! Send Rs 500 to UPI: scammer2024@paytm for processing.", "revealed_info": {"upi_id": "scammer2024@paytm"}},
-    {"message": "Account number is 1234567890123456. Transfer immediately!", "revealed_info": {"bank_account": "1234567890123456"}},
-    {"message": "Visit http://fake-bank-verify.com to complete KYC", "revealed_info": {"url": "http://fake-bank-verify.com"}},
-    {"message": "Sir, don't worry, this is 100% genuine. I am senior officer from head office.", "revealed_info": None},
-    {"message": "Last warning! Your account will be frozen if you don't complete verification NOW!", "revealed_info": None}
+    {"message": "Yes sir, send Rs 500 now to activate account.", "revealed_info": {"upi_id": "scammer@paytm"}},
+    {"message": "Send photo of your ATM card front and back.", "revealed_info": None},
+    {"message": "Click this link to update KYC: http://sbi-kyc-update.net", "revealed_info": {"url": "http://sbi-kyc-update.net"}},
+    {"message": "If you don't pay, police will come to your house in 1 hour.", "revealed_info": None}
 ]
-
 
 def persona_engagement_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Engage with the scammer using a believable persona.
-    
-    Args:
-        state: Current workflow state
-        
-    Returns:
-        Updated state with engagement results
+    Engage with the scammer using a dynamically generated persona.
     """
-    client = _get_gemini_client()
-    if not client:
-        raise RuntimeError("Gemini API client not initialized. Please set GOOGLE_API_KEY in .env")
     
-    # Initialize persona if not set
+    # 1. Generate Persona if not already set
     if not state.get("persona_name"):
-        import random
-        persona = random.choice(PERSONA_TEMPLATES)
+        persona = _generate_unique_persona(state)
         state["persona_name"] = persona["name"]
         state["persona_context"] = json.dumps(persona)
+        
+        # Transparent Logging
+        from utils.logger import AgentLogger
+        AgentLogger.persona_update(persona['name'], persona['occupation'], "Persona Generated")
     
     persona = json.loads(state.get("persona_context", "{}"))
     conversation_history = state.get("conversation_history", [])
     engagement_count = state.get("engagement_count", 0)
     max_engagements = state.get("max_engagements", settings.max_engagement_turns)
     
-    # Check if we should stop engaging
+    # Check max turns
     if engagement_count >= max_engagements:
         return {
             "engagement_complete": True,
@@ -149,10 +100,14 @@ def persona_engagement_agent(state: Dict[str, Any]) -> Dict[str, Any]:
         }
     
     try:
-        # Generate honeypot response using Gemini
-        honeypot_message = _generate_response(client, state, persona, conversation_history)
+        # 2. Generate Response
+        honeypot_message = _generate_response(state, persona, conversation_history)
         
-        # Add honeypot message to history
+        # Transparent Logging
+        from utils.logger import AgentLogger
+        AgentLogger.response_generated(honeypot_message)
+        
+        # 3. Update History
         new_history = list(conversation_history)
         new_history.append({
             "role": "honeypot",
@@ -160,15 +115,25 @@ def persona_engagement_agent(state: Dict[str, Any]) -> Dict[str, Any]:
             "turn_number": engagement_count + 1
         })
         
-        # Call Mock Scammer API to get response
-        scammer_response = _call_mock_scammer(
-            honeypot_message,
+        # 4. Handle Execution Mode
+        if state.get("execution_mode") == "live":
+            return {
+                "conversation_history": new_history,
+                "engagement_count": engagement_count + 1,
+                "engagement_complete": True,
+                "current_agent": "intelligence_extraction",
+                "final_response": {"agent_response": honeypot_message}
+            }
+
+        # 5. Simulation Mode: Internal Scammer Simulator
+        from utils.scam_simulator import simulator
+        scammer_response = simulator.get_response(
             state.get("conversation_id", str(uuid.uuid4())),
-            engagement_count + 1
+            engagement_count + 1,
+            honeypot_message
         )
         
         if scammer_response:
-            # Add scammer response to history
             new_history.append({
                 "role": "scammer",
                 "message": scammer_response.get("message", ""),
@@ -176,16 +141,13 @@ def persona_engagement_agent(state: Dict[str, Any]) -> Dict[str, Any]:
                 "revealed_info": scammer_response.get("revealed_info")
             })
             
-            # Check if conversation ended
             if scammer_response.get("conversation_ended"):
                 return {
                     "conversation_history": new_history,
-                    "engagement_count": engagement_count + 1,
                     "engagement_complete": True,
                     "current_agent": "intelligence_extraction"
                 }
         
-        # Determine next step
         next_agent = "persona_engagement" if engagement_count + 1 < max_engagements else "intelligence_extraction"
         
         return {
@@ -198,63 +160,63 @@ def persona_engagement_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Persona engagement error: {e}")
         return {
-            "conversation_history": conversation_history,
-            "engagement_count": engagement_count,
             "engagement_complete": True,
             "current_agent": "intelligence_extraction",
             "error": str(e)
         }
 
-
-def _generate_response(client, state: Dict[str, Any], persona: Dict, history: List) -> str:
-    """Generate a believable response using Gemini."""
+def _generate_unique_persona(state: Dict[str, Any]) -> Dict:
+    """Generate a unique persona using OpenAI based on the scam context."""
+    message = state.get("original_message", "")
+    scam_type = state.get("scam_type", "Unknown")
     
-    # Format conversation history
+    prompt = PERSONA_GENERATION_PROMPT.format(
+        message=message,
+        scam_type=scam_type
+    )
+    
+    try:
+        response_text = call_llm(
+            prompt=prompt,
+            system_instruction="You are a creative writer generating fictional character profiles.",
+            json_mode=True
+        )
+        return json.loads(response_text)
+        
+    except Exception as e:
+        logger.error(f"Persona generation error: {e}")
+        # Emergency Fallback
+        return {
+            "name": "Amit Patel", 
+            "age": 55, 
+            "occupation": "Clerk", 
+            "traits": "Confused", 
+            "context": "Has money but no tech skill", 
+            "voice": "Polite"
+        }
+
+def _generate_response(state: Dict[str, Any], persona: Dict, history: List) -> str:
+    """Generate a response in character."""
+    
+    # Format history
     history_text = ""
-    for turn in history[-6:]:  # Last 6 turns for context
+    for turn in history[-5:]:
         role = "YOU" if turn["role"] == "honeypot" else "SCAMMER"
         history_text += f"{role}: {turn['message']}\n"
     
-    # Get latest scammer message
     scammer_messages = [t for t in history if t["role"] == "scammer"]
     latest_scammer = scammer_messages[-1]["message"] if scammer_messages else state.get("original_message", "")
     
     prompt = ENGAGEMENT_PROMPT.format(
-        persona_name=persona.get("name", "Ramesh"),
-        persona_age=persona.get("age", 60),
-        persona_occupation=persona.get("occupation", "Retired"),
-        persona_traits=persona.get("traits", "Trusting"),
-        persona_context=persona.get("context", ""),
-        scam_type=state.get("scam_type", "UNKNOWN"),
-        conversation_history=history_text or "No previous conversation",
-        scammer_message=latest_scammer
+        name=persona.get("name", "Unknown"),
+        age=persona.get("age", "Unknown"),
+        occupation=persona.get("occupation", "Unknown"),
+        traits=persona.get("traits", "Unknown"),
+        context=persona.get("context", "Unknown"),
+        voice=persona.get("voice", "Natural"),
+        scam_type=state.get("scam_type", "Unknown"),
+        scammer_message=latest_scammer,
+        history=history_text or "No previous conversation"
     )
     
-    return _call_gemini_with_retry(client, prompt)
-
-
-def _call_mock_scammer(message: str, conversation_id: str, turn: int) -> Dict:
-    """Call the Mock Scammer API with fallback."""
-    try:
-        mock_url = f"http://localhost:{settings.mock_scammer_port}/engage"
-        
-        with httpx.Client(timeout=settings.gemini_timeout) as client:
-            response = client.post(
-                mock_url,
-                json={
-                    "victim_message": message,
-                    "conversation_id": conversation_id,
-                    "turn_number": turn
-                }
-            )
-            
-            if response.status_code == 200:
-                return response.json()
-                
-    except Exception as e:
-        logger.warning(f"Mock Scammer API unavailable: {e}, using fallback")
-        # Use fallback responses when API is unavailable
-        import random
-        return random.choice(FALLBACK_SCAMMER_RESPONSES)
-    
-    return None
+    return call_llm(prompt=prompt, system_instruction="You are a method actor playing a scam victim.")
