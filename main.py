@@ -203,6 +203,14 @@ async def analyze_get():
     """Compatibility endpoint for testers checking existence via GET."""
     return {"status": "ready", "message": "Send POST request to analyze"}
 
+@app.post("/analyze/")
+async def analyze_trailing_slash(
+    raw_request: Request,
+    api_key: str = Depends(verify_api_key)
+):
+    """Handle trailing slash to prevent 307 Redirects."""
+    return await analyze_message(raw_request, api_key)
+
 @app.post("/")
 async def root_post(request: Request):
     """Compatibility endpoint for testers posting to root."""
