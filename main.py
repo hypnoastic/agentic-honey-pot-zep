@@ -69,8 +69,13 @@ async def log_request_body(request: Request, call_next):
     except Exception as e:
         logger.error(f"Failed to read/log body: {e}")
     
-    response = await call_next(request)
-    return response
+    try:
+        response = await call_next(request)
+        logger.info(f"OUTGOING STATUS: {response.status_code}")
+        return response
+    except Exception as e:
+        logger.error(f"Middleware Exception: {e}")
+        raise e
 
 
 async def verify_api_key(x_api_key: Optional[str] = Header(None, description="API Key for authentication")):
