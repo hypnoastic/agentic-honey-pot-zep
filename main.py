@@ -61,6 +61,20 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def log_request_body(request: Request, call_next):
+    """Middleware to log raw request body for debugging."""
+    try:
+        body = await request.body()
+        logger.info(f"INCOMING REQUEST BODY: {body.decode()}")
+        logger.info(f"INCOMING HEADERS: {request.headers}")
+    except Exception as e:
+        logger.error(f"Failed to read/log body: {e}")
+    
+    response = await call_next(request)
+    return response
+
+
 async def verify_api_key(x_api_key: str = Header(..., description="API Key for authentication")):
     """
     Dependency to verify the x-api-key header.
