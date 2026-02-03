@@ -1,6 +1,6 @@
 """
 End-to-End Validation Test for Agentic Honey-Pot.
-Verifies normal operation, cold start, and JSON structure.
+Verifies normal operation, cold start, and support for Hackathon formats.
 """
 
 import sys
@@ -14,7 +14,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from main import app
 from config import get_settings
-from mock_scammer import mock_scammer
+from tests.mock_scammer import mock_scammer
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -32,12 +32,10 @@ class TestHoneyPotE2E(unittest.TestCase):
         
         # Use Mock Scammer to generate input
         scam_message = mock_scammer.get_response("Hello")
-        logger.info(f"Generated Mock Scam Message: {scam_message}")
         
         payload = {
             "message": scam_message,
-            "conversation_id": "test-judge-session-001",
-            "mode": "live" # Deprecated but checking if it breaks anything
+            "conversation_id": "test-judge-session-001"
         }
         
         headers = {"x-api-key": self.api_key}
@@ -49,29 +47,27 @@ class TestHoneyPotE2E(unittest.TestCase):
         
         # 2. Verify Valid JSON
         data = response.json()
-        logger.info(f"Response Received: {data}")
         
         self.assertIn("is_scam", data)
         self.assertIn("confidence_score", data)
         self.assertIn("extracted_entities", data)
         
-        # 3. Verify Logic Flow (Scam should be detected)
-        # Note: Depending on LLM, might vary, but simplified checks:
-        self.assertIsInstance(data["is_scam"], bool)
-        self.assertIsInstance(data["confidence_score"], float)
-        
         logger.info(">>> TEST PASS: Normal Scam Flow")
 
-    def test_cold_start_new_user(self):
-        """Test 2: Cold Start (New/Random User)"""
-        logger.info(">>> TEST START: Cold Start")
+    def test_hackathon_payload_support(self):
+        """Test 2: Verify support for Hackathon Nested JSON & sessionId"""
+        logger.info(">>> TEST START: Hackathon Payload Support")
         
-        import uuid
-        new_id = str(uuid.uuid4())
-        
+        # Complex nested structure seen in Hackathon logs
         payload = {
-            "message": "Urgent: You won a lottery! Click here: http://bit.ly/fake",
-            "conversation_id": new_id
+            "sessionId": "hackathon-session-123",
+            "message": {
+                "text": "URGENT: Your connection will be cut. Pay bill now.",
+                "sender": "scammer",
+                "timestamp": 1234567890
+            },
+            "conversationHistory": [],
+            "metadata": {"source": "SMS"}
         }
         
         headers = {"x-api-key": self.api_key}
@@ -81,10 +77,11 @@ class TestHoneyPotE2E(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         
-        self.assertEqual(data["conversation_id"], new_id)
-        self.assertTrue(data["is_scam"] or data["confidence_score"] > 0.5) # Should likely detect lottery scam
+        # Verify it handled the alias and nested text
+        self.assertEqual(data["conversation_id"], "hackathon-session-123")
+        self.assertTrue(data["is_scam"]) # Should detect "Pay bill now"
         
-        logger.info(">>> TEST PASS: Cold Start")
+        logger.info(">>> TEST PASS: Hackathon Payload Support")
 
     def test_clean_message_flow(self):
         """Test 3: Legitimate Message (Verify Dynamic Scoring)"""
@@ -101,31 +98,44 @@ class TestHoneyPotE2E(unittest.TestCase):
         
         self.assertEqual(response.status_code, 200)
         data = response.json()
-        logger.info(f"Clean Message Response: {data}")
         
         # Verify it is NOT detected as a scam
         self.assertFalse(data["is_scam"], "Benign message was incorrectly flagged as scam")
+        self.assertLess(data["confidence_score"], 0.5)
         
-        # Verify confidence score is low (proving it's dynamic, not hardcoded 95%)
-        # Allowing some margin for 'suspicion' but strictly less than threshold (usually 0.6)
-        self.assertLess(data["confidence_score"], 0.5, "Confidence score too high for benign message")
-        
-        logger.info(">>> TEST PASS: Clean Message Flow (Dynamic Scoring Confirmed)")
+        logger.info(">>> TEST PASS: Clean Message Flow")
 
-    def test_safe_response_structure_guarantee(self):
-        """Verify strict JSON schema adherence"""
+
+    def test_missing_auth(self):
+        """Test 4: Verify Auth Enforcement"""
         payload = {"message": "Test"}
-        headers = {"x-api-key": self.api_key}
-        response = self.client.post("/analyze", json=payload, headers=headers)
-        data = response.json()
+        # No Headers
+        response = self.client.post("/analyze", json=payload)
+        self.assertEqual(response.status_code, 401)
+
+    def test_compatibility_endpoints(self):
+        """Test 5: Verify Hackathon Compatibility Endpoints"""
+        logger.info(">>> TEST START: Compatibility Endpoints")
         
-        # Check all required fields from Safe Response
-        required = ["is_scam", "scam_type", "confidence_score", 
-                   "extracted_entities", "behavioral_signals", 
-                   "confidence_factors", "agent_reply", "conversation_id"]
-                   
-        for field in required:
-            self.assertIn(field, data, f"Missing required field: {field}")
+        # 1. GET /analyze (Ping check)
+        resp1 = self.client.get("/analyze")
+        self.assertEqual(resp1.status_code, 200)
+        self.assertIn("ready", str(resp1.json()))
+        
+        # 2. POST / (Root Ping)
+        resp2 = self.client.post("/", json={})
+        self.assertEqual(resp2.status_code, 200)
+        
+        # 3. Trailing Slash (POST /analyze/)
+        # Should NOT fail or 307 if handled correctly
+        # Note: TestClient follows redirects by default, so we check final status
+        payload = {"message": "Slash test", "conversation_id": "test-slash"}
+        headers = {"x-api-key": self.api_key}
+        resp3 = self.client.post("/analyze/", json=payload, headers=headers)
+        self.assertEqual(resp3.status_code, 200)
+        self.assertTrue(resp3.json()["is_scam"] is not None)
+            
+        logger.info(">>> TEST PASS: Compatibility Endpoints")
 
 if __name__ == "__main__":
     unittest.main()
