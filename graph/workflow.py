@@ -159,6 +159,7 @@ async def run_honeypot_analysis(
     """
     import uuid
     import logging
+    import asyncio
     
     logger = logging.getLogger(__name__)
     
@@ -261,8 +262,8 @@ async def run_honeypot_analysis(
     # Create and run workflow
     workflow = create_honeypot_workflow()
     
-    # Execute the workflow
-    final_state = workflow.invoke(initial_state)
+    # Execute the workflow (Run in thread to avoid blocking event loop)
+    final_state = await asyncio.to_thread(workflow.invoke, initial_state)
     
     # Persist results to Zep memory
     try:
