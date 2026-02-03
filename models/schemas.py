@@ -2,24 +2,30 @@
 Pydantic schemas for request/response validation.
 """
 
-from typing import List, Optional
+from typing import List, Optional, Union, Dict, Any
 from pydantic import BaseModel, Field
 
+class HackathonMessage(BaseModel):
+    """Message structure used by Hackathon Tester."""
+    sender: Optional[str] = None
+    text: Optional[str] = None
+    timestamp: Optional[int] = None
 
 class AnalyzeRequest(BaseModel):
     """Request schema for the /analyze endpoint."""
-    message: Optional[str] = Field(
+    message: Optional[Union[str, HackathonMessage, Dict[str, Any]]] = Field(
         default="",
-        description="The incoming message to analyze for scam detection",
-        max_length=10000
+        description="The incoming message to analyze (string or object)"
     )
     conversation_id: Optional[str] = Field(
         default=None,
+        alias="sessionId", # Support both sessionId and conversation_id
         description="Optional conversation ID for multi-turn memory continuity"
     )
 
     class Config:
         extra = "ignore"
+        populate_by_name = True # Allow using field name (conversation_id) OR alias (sessionId)
 
 
 class ExtractedEntities(BaseModel):

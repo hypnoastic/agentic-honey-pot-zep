@@ -6,6 +6,7 @@ Uses OpenAI to dynamically GENERATE a unique victim profile and engage naturally
 
 import json
 import uuid
+import random
 import logging
 import httpx
 from typing import Dict, Any, List
@@ -21,19 +22,20 @@ PERSONA_GENERATION_PROMPT = """Analyze the incoming scam message and GENERATE a 
 SCAM MESSAGE: "{message}"
 DETECTED SCAM TYPE: {scam_type}
 
-REQUIRED TRAITS (Optimize for this):
+REQUIRED TRAITS (Winning Strategy):
 {traits_instruction}
 
-Create a specific, believable Indian persona (Name, Age, Occupation, etc.).
-- For Bank Scams: Often older people, retired, fearful of authority.
-- For Job Scams: Young students, housewives, or unemployed youth.
-- For Lottery/Romance: Lonely or gullible individuals.
+Create a specific, believable Indian persona.
+CRITICAL INSTRUCTION:
+1. GENERATE A RANDOM, UNIQUE NAME. Do NOT use common names like 'Rajesh Kumar', 'Amit Patel', 'Rahul Sharma', or 'Riya'.
+2. VARY the designation/occupation widely (e.g., Retired Army Officer, Small Shop Owner, Govt Clerk, struggling Artist).
+3. VARY the region and background (North, South, East, West India).
 
 Respond with JSON ONLY:
 {{
-    "name": "Full Name",
+    "name": "Full Name (Random)",
     "age": 45,
-    "occupation": "Job Title",
+    "occupation": "Job Title (Specific)",
     "traits": "Personality traits (e.g., Anxious, Greed, Naive)",
     "context": "Background details (e.g., living situation, financial status)",
     "voice": "Speech style (e.g., Formal, Broken English, Over-eager)"
@@ -167,15 +169,15 @@ def _generate_unique_persona(state: Dict[str, Any]) -> Dict:
         
     except Exception as e:
         logger.error(f"Persona generation error: {e}")
-        # Emergency Fallback
-        return {
-            "name": "Amit Patel", 
-            "age": 55, 
-            "occupation": "Clerk", 
-            "traits": "Confused", 
-            "context": "Has money but no tech skill", 
-            "voice": "Polite"
-        }
+        # Emergency Fallback (Randomized to avoid repetition)
+        fallbacks = [
+            {"name": "Amit Patel", "age": 55, "occupation": "Clerk", "traits": "Confused", "context": "Has money but no tech skill", "voice": "Polite"},
+            {"name": "Priya Sharma", "age": 28, "occupation": "Teacher", "traits": "Anxious", "context": "Worried about reputation", "voice": "Formal"},
+            {"name": "Vikram Singh", "age": 62, "occupation": "Retired Army", "traits": "Strict but Gullible", "context": "Pensioner", "voice": "Authoritative"},
+            {"name": "Sneha Reddy", "age": 22, "occupation": "Student", "traits": "Curious", "context": "Needs money for fees", "voice": "Casual"},
+            {"name": "Mohammed Ali", "age": 40, "occupation": "Shopkeeper", "traits": "Greedy", "context": "Looking for profit", "voice": "Broken English"}
+        ]
+        return random.choice(fallbacks)
 
 def _generate_response(state: Dict[str, Any], persona: Dict, history: List) -> str:
     """Generate a response in character."""

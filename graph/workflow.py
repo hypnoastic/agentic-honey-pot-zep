@@ -3,7 +3,7 @@ LangGraph Workflow for the Agentic Honey-Pot system.
 Orchestrates all agents in a stateful graph with Zep memory integration.
 """
 
-from typing import Dict, Any, Literal, Optional
+from typing import Dict, Any, Literal, Optional, Union
 from langgraph.graph import StateGraph, END
 
 from graph.state import HoneypotState, create_initial_state

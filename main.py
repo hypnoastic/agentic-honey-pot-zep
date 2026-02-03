@@ -139,52 +139,33 @@ async def health_check():
     description="Analyzes incoming message for scam indicators and extracts intelligence through simulated engagement. Supports multi-turn memory via conversation_id."
 )
 async def analyze_message(
-    raw_request: Request,
+    request: AnalyzeRequest,
     api_key: str = Depends(verify_api_key)
 ):
     """
     Analyze an incoming message for scam detection and intelligence extraction.
     GUARANTEE: Always returns a valid JSON response.
     """
-    # Manual Body Parsing to handle Empty/Malformed input
-    try:
-        body_bytes = await raw_request.body()
-        if not body_bytes:
-            data = {}
-        else:
-            try:
-                data = await raw_request.json()
-            except Exception:
-                # Handle invalid JSON (e.g. plain text)
-                data = {"message": body_bytes.decode(errors="ignore")}
-    except Exception:
-        data = {}
-
-    # Extract message content safely (Handle nested dict from Hackathon Tester)
-    raw_message = data.get("message", "")
-    message_text = ""
-    
-    if isinstance(raw_message, str):
-        message_text = raw_message
-    elif isinstance(raw_message, dict):
-        # Extract text from nested object (e.g. {"text": "...", "sender": "..."})
-        message_text = raw_message.get("text") or raw_message.get("content") or str(raw_message)
-    else:
-        message_text = str(raw_message) if raw_message is not None else ""
-
-    # Construct request object manually from safe dict
-    request = AnalyzeRequest(
-        message=message_text,
-        conversation_id=data.get("conversation_id") or data.get("sessionId")
-    )
     # 1. Generate ID safely
     conversation_id = request.conversation_id or str(uuid.uuid4())
     request_id = conversation_id[:8]
     
     try:
-        # 2. Sanitize input
-        message = sanitize_message(request.message)
+        # 2. Extract Message Content (Handle Union)
+        raw_message = request.message
+        message_text = ""
         
+        if isinstance(raw_message, str):
+            message_text = raw_message
+        elif hasattr(raw_message, "text") and raw_message.text:
+             message_text = raw_message.text
+        elif isinstance(raw_message, dict):
+             message_text = raw_message.get("text") or str(raw_message)
+        else:
+             message_text = str(raw_message) if raw_message else ""
+             
+        # Sanitize input
+        message = sanitize_message(message_text)
         if not message:
             # Soft failure for empty message
             from utils.safe_response import create_fallback_response
