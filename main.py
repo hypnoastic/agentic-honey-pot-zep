@@ -58,6 +58,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Log validation errors and raw body to debug schema mismatches."""
+    try:
+        body = await request.body()
+        logger.error(f"VALIDATION ERROR: {exc.errors()}")
+        logger.error(f"BAD REQUEST BODY: {body.decode()}")
+    except Exception as e:
+        logger.error(f"Could not read body during validation error: {e}")
+    
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors(), "body": "Invalid Request"}
+    )
+
 
 
 
