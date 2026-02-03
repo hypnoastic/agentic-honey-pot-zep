@@ -160,10 +160,22 @@ async def analyze_message(
     except Exception:
         data = {}
 
+    # Extract message content safely (Handle nested dict from Hackathon Tester)
+    raw_message = data.get("message", "")
+    message_text = ""
+    
+    if isinstance(raw_message, str):
+        message_text = raw_message
+    elif isinstance(raw_message, dict):
+        # Extract text from nested object (e.g. {"text": "...", "sender": "..."})
+        message_text = raw_message.get("text") or raw_message.get("content") or str(raw_message)
+    else:
+        message_text = str(raw_message) if raw_message is not None else ""
+
     # Construct request object manually from safe dict
     request = AnalyzeRequest(
-        message=data.get("message", ""),
-        conversation_id=data.get("conversation_id")
+        message=message_text,
+        conversation_id=data.get("conversation_id") or data.get("sessionId")
     )
     # 1. Generate ID safely
     conversation_id = request.conversation_id or str(uuid.uuid4())
