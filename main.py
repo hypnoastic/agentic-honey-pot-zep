@@ -209,10 +209,11 @@ async def analyze_get():
 @app.post("/analyze/")
 async def analyze_trailing_slash(
     request: AnalyzeRequest,
+    raw_request: Request,
     api_key: str = Depends(verify_api_key)
 ):
     """Handle trailing slash to prevent 307 Redirects."""
-    return await analyze_message(request, api_key)
+    return await analyze_message(request, raw_request, api_key)
 
 @app.post("/")
 async def root_post(request: Request):
