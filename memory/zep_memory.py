@@ -7,7 +7,7 @@ Uses Zep Cloud SDK with User, Thread, and Graph APIs per official documentation.
 import json
 import logging
 import uuid
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Union
 from datetime import datetime, timezone
 
 from config import get_settings
