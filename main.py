@@ -59,23 +59,7 @@ app.add_middleware(
 )
 
 
-@app.middleware("http")
-async def log_request_body(request: Request, call_next):
-    """Middleware to log raw request body for debugging."""
-    try:
-        body = await request.body()
-        logger.info(f"INCOMING REQUEST BODY: {body.decode()}")
-        logger.info(f"INCOMING HEADERS: {request.headers}")
-    except Exception as e:
-        logger.error(f"Failed to read/log body: {e}")
-    
-    try:
-        response = await call_next(request)
-        logger.info(f"OUTGOING STATUS: {response.status_code}")
-        return response
-    except Exception as e:
-        logger.error(f"Middleware Exception: {e}")
-        raise e
+
 
 
 async def verify_api_key(x_api_key: Optional[str] = Header(None, description="API Key for authentication")):
@@ -140,6 +124,7 @@ async def health_check():
 )
 async def analyze_message(
     request: AnalyzeRequest,
+    raw_request: Request,
     api_key: str = Depends(verify_api_key)
 ):
     """
@@ -172,7 +157,9 @@ async def analyze_message(
             logger.warning(f"[{request_id}] Empty message received")
             return create_fallback_response(conversation_id, "Message cannot be empty")
         
-        logger.info(f"[{request_id}] Analyzing message: {message[:100]}...")
+        # Log full detailed message now that we have safely parsed it
+        logger.info(f"[{request_id}] HEADERS: {raw_request.headers}")
+        logger.info(f"[{request_id}] ANALYZING MESSAGE BODY: {message}")
         
         # 3. Execution (Protected)
         # Run workflow
