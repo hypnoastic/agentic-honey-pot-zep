@@ -85,7 +85,9 @@ def planner_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     entities = state.get("extracted_entities", {})
     entity_count = len(entities.get("bank_accounts", [])) + len(entities.get("upi_ids", [])) + len(entities.get("phishing_urls", []))
     
-    max_turns = state.get("max_engagements", 8)
+    from config import get_settings
+    settings = get_settings()
+    max_turns = state.get("max_engagements", settings.max_engagement_turns)
     turns_used = state.get("engagement_count", 0)
 
     # Log turn info
@@ -99,8 +101,9 @@ def planner_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     
     # UPI ID pattern: xxx@upi, xxx@paytm, xxx@ybl, xxx@gpay, etc.
     upi_pattern = r'\b[a-zA-Z0-9._-]+@[a-zA-Z]+\b'
-    # Phone number pattern: 10+ digit numbers (with optional +91 prefix)
-    phone_pattern = r'(?:\+91)?[789]\d{9}\b'
+    # Phone number pattern: 10 digits starting with 7/8/9 (with optional +91 prefix)
+    # Negative lookbehind prevents matching within longer numbers (like bank accounts)
+    phone_pattern = r'(?<!\d)(?:\+91)?[789]\d{9}(?!\d)'
     # Bank account pattern: 9-18 digit numbers
     bank_pattern = r'\b\d{11,18}\b'
     # Phishing URL pattern: http/https links with suspicious domains
@@ -187,32 +190,40 @@ def planner_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     high_value_count = len(bank_accounts) + len(upi_ids) + len(phishing_urls)
     total_entities = high_value_count + len(phone_numbers)
     
-    # SMART EXIT CONDITIONS (balanced for early scammer dropout):
-    # 1. If we have 3+ high-value entities → exit immediately (great extraction)
-    # 2. If we have 2+ high-value entities → exit immediately (good extraction)
-    # 3. If we have 1+ high-value entity AND 3+ turns → exit (gave them a chance)
-    # 4. If we're at 60%+ of max turns with ANY entity → exit
-    # 5. Approaching max turns → must exit
+    # SMART EXIT CONDITIONS (adjusted for max_turns=15):
+    # 1. If we have 5+ high-value entities → exit immediately (excellent extraction)
+    # 2. If we have 4+ high-value entities AND 7+ turns → exit (great extraction)
+    # 3. If we have 3+ high-value entities AND 8+ turns → exit (good extraction)
+    # 4. If we have 2+ high-value entities AND 8+ turns → exit (good extraction)
+    # 5. If we have 1+ high-value entity AND 10+ turns → exit (decent extraction)
+    # 6. If we're at 70%+ of max turns with ANY entity → exit
+    # 7. Approaching max turns → must exit
     
     should_complete = False
     completion_reason = ""
     
-    if high_value_count >= 3:
+    if high_value_count >= 5:
         should_complete = True
         completion_reason = f"Extracted {high_value_count} high-value entities (UPI/Bank/URL). Excellent extraction."
-    elif high_value_count >= 2:
+    elif high_value_count >= 4 and turns_used >= 7:
         should_complete = True
-        completion_reason = f"Extracted {high_value_count} high-value entities (UPI/Bank/URL). Good extraction."
-    elif high_value_count >= 1 and turns_used >= 3:
+        completion_reason = f"Extracted {high_value_count} high-value entities after {turns_used} turns. Great extraction."
+    elif high_value_count >= 3 and turns_used >= 8:
+        should_complete = True
+        completion_reason = f"Extracted {high_value_count} high-value entities after {turns_used} turns. Good extraction."
+    elif high_value_count >= 2 and turns_used >= 8:
+        should_complete = True
+        completion_reason = f"Extracted {high_value_count} high-value entities after {turns_used} turns. Good extraction."
+    elif high_value_count >= 1 and turns_used >= 10:
         should_complete = True
         completion_reason = f"Extracted {high_value_count} entity after {turns_used} turns. Sufficient extraction."
-    elif total_entities >= 2 and turns_used >= 2:
-        # If we have 2+ total entities (including phones), also good to exit
+    elif total_entities >= 4 and turns_used >= 6:
+        # If we have 4+ total entities (including phones), also good to exit
         should_complete = True
         completion_reason = f"Extracted {total_entities} total entities after {turns_used} turns. Good extraction."
-    elif total_entities >= 1 and turns_used >= (max_turns * 0.6):
+    elif total_entities >= 1 and turns_used >= (max_turns * 0.7):
         should_complete = True
-        completion_reason = f"{turns_used} turns used (60%+ of max). Have {total_entities} entities. Time to complete."
+        completion_reason = f"{turns_used} turns used (70%+ of max). Have {total_entities} entities. Time to complete."
     elif turns_used >= max_turns - 1:
         should_complete = True
         completion_reason = f"Approaching max turns ({turns_used}/{max_turns}). Completing engagement."

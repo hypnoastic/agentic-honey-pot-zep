@@ -111,7 +111,9 @@ def _route_from_planner(state: HoneypotState) -> Literal["engage", "judge", "end
     
     # Safety Check: If max turns reached, force judge
     count = state.get("engagement_count", 0)
-    max_turns = state.get("max_engagements", 5)
+    from config import get_settings
+    settings = get_settings()
+    max_turns = state.get("max_engagements", settings.max_engagement_turns)
     
     if count >= max_turns and action == "engage":
         return "judge"
