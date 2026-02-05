@@ -73,7 +73,13 @@ def agentic_judge_agent(state: Dict[str, Any]) -> Dict[str, Any]:
         )
         
         result = json.loads(response_text)
-        is_scam_final = result.get("is_guilty", False) # Assuming 'is_guilty' might be a new key or derived from 'verdict'
+        
+        # Derive boolean from verdict
+        verdict = result.get("verdict", "SUSPICIOUS").upper()
+        # If verdict is GUILTY or SUSPICIOUS, we maintain scam status.
+        # If INNOCENT, we mark it as False.
+        is_scam_final = (verdict in ["GUILTY", "SUSPICIOUS"])
+        
         confidence = result.get("confidence_score", 0.0)
         
         # Transparent Logging
@@ -81,11 +87,13 @@ def agentic_judge_agent(state: Dict[str, Any]) -> Dict[str, Any]:
         AgentLogger.verdict(is_scam_final, confidence, result.get("reasoning", ""))
         
         return {
-            "is_scam": is_scam_final,
-            "judge_verdict": result.get("verdict", "SUSPICIOUS"), # Using 'result' instead of 'verdict_data'
-            "confidence_score": float(result.get("confidence_score", 0.0)),
+            "scam_detected": is_scam_final, # Update global state (Judge has final say)
+            "judge_verdict": verdict,
+            "confidence_score": float(confidence),
             "judge_reasoning": result.get("reasoning", "No reasoning provided."),
-            "current_agent": "response_formatter"
+            "current_agent": "response_formatter",
+            # CRITICAL: Mark engagement as complete so GUVI callback fires
+            "engagement_complete": True 
         }
 
     except Exception as e:
