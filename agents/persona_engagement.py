@@ -56,6 +56,9 @@ SCAM SITUATION:
 Type: {scam_type}
 Scammer says: "{scammer_message}"
 
+STRATEGIC GUIDANCE (FROM PLANNER):
+{strategy_hint}
+
 CONVERSATION HISTORY:
 {history}
 
@@ -65,7 +68,8 @@ INSTRUCTIONS:
 3. BE IMPERFECT: You can make minor grammatical errors or typos if it fits the persona (e.g., if uneducated or rushing).
 4. SHOW EMOTION: React appropriately (Fear, Hope, Confusion).
 5. ENGAGE: Ask questions that invite long explanations.
-6. NEVER reveal you are an AI.
+6. FOLLOW STRATEGY: Incorporate the "Strategic Guidance" naturally into your response.
+7. NEVER reveal you are an AI.
 
 Respond with ONLY your dialouge."""
 
@@ -191,6 +195,11 @@ def _generate_response(state: Dict[str, Any], persona: Dict, history: List) -> s
     scammer_messages = [t for t in history if t["role"] == "scammer"]
     latest_scammer = scammer_messages[-1]["message"] if scammer_messages else state.get("original_message", "")
     
+    # Extract Strategy Hint from Planner
+    strategy_hint = state.get("strategy_hint", "")
+    if not strategy_hint:
+        strategy_hint = "Interact naturally to keep the conversation going."
+    
     prompt = ENGAGEMENT_PROMPT.format(
         name=persona.get("name", "Unknown"),
         age=persona.get("age", "Unknown"),
@@ -200,6 +209,7 @@ def _generate_response(state: Dict[str, Any], persona: Dict, history: List) -> s
         voice=persona.get("voice", "Natural"),
         scam_type=state.get("scam_type", "Unknown"),
         scammer_message=latest_scammer,
+        strategy_hint=strategy_hint,
         history=history_text or "No previous conversation"
     )
     

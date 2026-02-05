@@ -1,9 +1,11 @@
 """
 Pydantic schemas for request/response validation.
+Aligned with problem statement Sections 6, 7, and 8.
 """
 
 from typing import List, Optional, Union, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
+
 
 class HackathonMessage(BaseModel):
     """Message structure used by Hackathon Tester."""
@@ -11,25 +13,49 @@ class HackathonMessage(BaseModel):
     text: Optional[str] = None
     timestamp: Optional[int] = None
 
+
+class ConversationMessage(BaseModel):
+    """Message in conversation history (Section 6.2)."""
+    sender: str  # "scammer" or "user"
+    text: str
+    timestamp: Optional[int] = None
+
+
+class RequestMetadata(BaseModel):
+    """Metadata about the request context (Section 6.3)."""
+    model_config = ConfigDict(extra="ignore")
+    
+    channel: Optional[str] = None  # SMS / WhatsApp / Email / Chat
+    language: Optional[str] = None
+    locale: Optional[str] = None
+
+
 class AnalyzeRequest(BaseModel):
-    """Request schema for the /analyze endpoint."""
+    """Request schema for the /analyze endpoint (Section 6)."""
+    model_config = ConfigDict(extra="ignore", populate_by_name=True)
+    
     message: Optional[Union[str, HackathonMessage, Dict[str, Any]]] = Field(
         default="",
         description="The incoming message to analyze (string or object)"
     )
     conversation_id: Optional[str] = Field(
         default=None,
-        alias="sessionId", # Support both sessionId and conversation_id
-        description="Optional conversation ID for multi-turn memory continuity"
+        alias="sessionId",  # Support both sessionId and conversation_id
+        description="Session ID for multi-turn conversation continuity"
     )
-
-    class Config:
-        extra = "ignore"
-        populate_by_name = True # Allow using field name (conversation_id) OR alias (sessionId)
+    conversation_history: List[ConversationMessage] = Field(
+        default_factory=list,
+        alias="conversationHistory",
+        description="Previous messages in this conversation (empty for first message)"
+    )
+    metadata: Optional[RequestMetadata] = Field(
+        default=None,
+        description="Optional context metadata (channel, language, locale)"
+    )
 
 
 class ExtractedEntities(BaseModel):
-    """Extracted intelligence entities from scam interaction."""
+    """Extracted intelligence entities from scam interaction (internal use for GUVI callback)."""
     bank_accounts: List[str] = Field(
         default_factory=list,
         description="List of extracted bank account numbers"
@@ -45,39 +71,19 @@ class ExtractedEntities(BaseModel):
 
 
 class AnalyzeResponse(BaseModel):
-    """Response schema for the /analyze endpoint."""
-    is_scam: bool = Field(
-        ...,
-        description="Whether the message was detected as a scam"
+    """
+    Response schema for the /analyze endpoint (Section 8).
+    
+    Minimal response format as required by problem statement:
+    {"status": "success", "reply": "..."}
+    """
+    status: str = Field(
+        default="success",
+        description="Response status (success/error)"
     )
-    scam_type: Optional[str] = Field(
+    reply: Optional[str] = Field(
         default=None,
-        description="Type of scam detected (e.g., UPI_FRAUD, LOTTERY_FRAUD, PHISHING)"
-    )
-    confidence_score: float = Field(
-        ...,
-        ge=0.0,
-        le=1.0,
-        description="Confidence score of the scam detection (0.0 to 1.0)"
-    )
-    extracted_entities: ExtractedEntities = Field(
-        default_factory=ExtractedEntities,
-        description="Extracted intelligence from scam engagement"
-    )
-    behavioral_signals: List[str] = Field(
-        default_factory=list,
-        description="Psychological triggers identified (e.g. Urgency, Greed)"
-    )
-    confidence_factors: dict = Field(
-        default_factory=dict,
-        description="Breakdown of confidence score factors"
+        description="The agent's reply to send to the scammer"
     )
 
-    agent_reply: Optional[str] = Field(
-        default=None,
-        description="The immediate reply to send to the scammer (Live Mode only)"
-    )
-    conversation_id: Optional[str] = Field(
-        default=None,
-        description="Conversation ID for multi-turn continuity (use in subsequent requests)"
-    )
+

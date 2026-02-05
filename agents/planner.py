@@ -13,7 +13,7 @@ from utils.llm_client import call_llm
 logger = logging.getLogger(__name__)
 
 PLANNER_PROMPT = """You are the STRATEGIC PLANNER for an AI Honey-Pot system.
-Your goal is to waste the scammer's time (scambaiting) and extract intelligence (bank accounts, UPIs).
+Your goal is to waste the scammer's time (scambaiting) and extract intelligence (bank accounts, UPIs, phishing URLs).
 
 CURRENT STATE:
 - Scam Detected: {scam_detected}
@@ -40,14 +40,22 @@ LATEST SCAMMER MESSAGE:
 "{latest_message}"
 
 DECISION LOGIC:
-1. "engage": DEFAULT ACTION. If the scammer is still talking, KEEP TALKING. Waste their time. Ask dumb questions.
-2. "judge": ONLY if we have hit max turns ({max_turns}) OR the user has stopped responding/said goodbye.
+1. "engage": Keep the conversation going. Ask questions, stall, waste their time.
+2. "judge": Conclude the conversation when:
+   - We have successfully extracted valuable intelligence (bank accounts, UPI IDs, URLs)
+   - Max turns ({max_turns}) reached
+   - Scammer has stopped responding or ended conversation
+   - Diminishing returns (scammer is repeating themselves with no new info)
 3. "end": ONLY if it is clearly NOT a scam.
+
+SMART EXIT CRITERIA:
+- If extracted_count > 0 AND the scammer is just repeating threats without new information, choose "judge"
+- If extracted_count >= 2, consider "judge" to avoid over-engagement
+- Balance: Maximize extraction while minimizing wasted turns
 
 STRATEGY GUIDELINES:
 - If they ask for money, feign ignorance or technical issues.
 - If they threaten action (police/block), act scared but incompetent.
-- DO NOT JUDGE EARLY. We want to maximize the conversation duration.
 - ADAPT: If a "Winning Tactic" is suggested above, TRY TO INCORPORATE IT.
 
 Respond with JSON ONLY:
@@ -59,6 +67,7 @@ Respond with JSON ONLY:
 def planner_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Decide the next action and strategy.
+    Uses LLM to make strategic decisions from the FIRST turn.
     """
     logger.info("Planner Agent: Analyzing strategy...")
     
@@ -79,36 +88,21 @@ def planner_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     max_turns = state.get("max_engagements", 8)
     turns_used = state.get("engagement_count", 0)
 
-    # SMART QUIT LOGIC (Optimization)
-    # If we have gathered intelligence (Entities > 0) AND engaged for at least 3 turns,
-    # we can stop early to save time/cost.
-    if turns_used >= 3 and entity_count > 0:
-        logger.info(f"Smart Quit triggered: Intelligence gathered ({entity_count} entities) after {turns_used} turns.")
-        
-        # Transparent Logging
-        from utils.logger import AgentLogger
-        AgentLogger.plan_decision(
-            current_turn=turns_used,
-            max_turns=max_turns,
-            decision="judge",
-            reasoning="Smart Quit: Sufficient intelligence gathered."
-        )
-        
-        return {
-            "planner_action": "judge",
-            "strategy_hint": "Sufficient intelligence gathered. Proceeding to verdict.",
-            "current_agent": "planner"
-        }
+    # Log turn info
+    logger.info(f"Planner: Turn {turns_used}/{max_turns}, Entities extracted: {entity_count}")
 
-    # ROI Check
+    # NOTE: Removed "Smart Quit" logic - LLM now decides on every turn
+    # The planner should make strategic decisions, not hardcoded rules
+
+    # ROI Check (still useful for cost optimization on repeated patterns)
     scam_stats = state.get("scam_stats", {})
     success_rate = scam_stats.get("success_rate", 0.5)
     total_attempts = scam_stats.get("total_attempts", 0)
     
-    # If we have significant data (>5) and success is terrible (<10%)
-    # SKIP ENGAGEMENT to save cost.
-    if total_attempts > 5 and success_rate < 0.10:
-        logger.info(f"ROI Decision: LOW SUCCESS RATE ({success_rate:.2f}). Skipping engagement.")
+    # If we have significant data (>10) and success is terrible (<5%)
+    # SKIP ENGAGEMENT to save cost. (More conservative threshold)
+    if total_attempts > 10 and success_rate < 0.05:
+        logger.info(f"ROI Decision: VERY LOW SUCCESS RATE ({success_rate:.2f}). Skipping engagement.")
         
         from utils.logger import AgentLogger
         AgentLogger.plan_decision(
@@ -119,9 +113,10 @@ def planner_agent(state: Dict[str, Any]) -> Dict[str, Any]:
         )
         return {
             "planner_action": "judge",
-            "strategy_hint": "Skipping engagement due to historically low success rate.",
+            "strategy_hint": "Skipping engagement due to historically very low success rate.",
             "current_agent": "planner"
         }
+
 
     winning_tactics = state.get("winning_strategies", [])
     if winning_tactics:

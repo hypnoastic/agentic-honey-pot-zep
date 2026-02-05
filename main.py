@@ -173,32 +173,54 @@ async def analyze_message(
             # Soft failure for empty message
             from utils.safe_response import create_fallback_response
             logger.warning(f"[{request_id}] Empty message received")
-            return create_fallback_response(conversation_id, "Message cannot be empty")
+            return create_fallback_response("Message cannot be empty")
         
         # Log full detailed message now that we have safely parsed it
         logger.info(f"[{request_id}] HEADERS: {raw_request.headers}")
         logger.info(f"[{request_id}] ANALYZING MESSAGE BODY: {message}")
         
-        # 3. Execution (Protected)
-        # Run workflow
+        # 3. Extract conversation history for multi-turn support (Section 6.2)
+        conversation_history = []
+        for msg in (request.conversation_history or []):
+            conversation_history.append({
+                "sender": msg.sender,
+                "text": msg.text,
+                "timestamp": msg.timestamp
+            })
+        
+        # Extract metadata (Section 6.3)
+        metadata = None
+        if request.metadata:
+            metadata = {
+                "channel": request.metadata.channel,
+                "language": request.metadata.language,
+                "locale": request.metadata.locale
+            }
+        
+        logger.info(f"[{request_id}] Conversation history: {len(conversation_history)} prior messages")
+        
+        # 4. Execution (Protected)
+        # Run workflow with full context
         result = await run_honeypot_analysis(
             message=message,
             max_engagements=settings.max_engagement_turns,
-            conversation_id=conversation_id
+            conversation_id=conversation_id,
+            conversation_history=conversation_history,
+            metadata=metadata
         )
         
-        # 4. Safe Construction
+        # 5. Safe Construction
         from utils.safe_response import construct_safe_response
         response = construct_safe_response(result, conversation_id)
         
-        logger.info(f"[{request_id}] Analysis complete. Is scam: {response.is_scam}")
+        logger.info(f"[{request_id}] Analysis complete. Status: {response.status}")
         return response
         
     except Exception as e:
         # 5. Global Error Boundary
         logger.exception(f"[{request_id}] CRITICAL FAILURE: {str(e)}")
         from utils.safe_response import create_fallback_response
-        return create_fallback_response(conversation_id, "Internal system error during analysis")
+        return create_fallback_response("Internal system error during analysis")
 
 
 @app.get("/analyze")

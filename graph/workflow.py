@@ -3,7 +3,7 @@ LangGraph Workflow for the Agentic Honey-Pot system.
 Orchestrates all agents in a stateful graph with Zep memory integration.
 """
 
-from typing import Dict, Any, Literal, Optional, Union
+from typing import Dict, Any, Literal, Optional, Union, List
 from langgraph.graph import StateGraph, END
 
 from graph.state import HoneypotState, create_initial_state
@@ -144,15 +144,19 @@ def _route_after_extraction(state: HoneypotState) -> Literal["loop", "exit"]:
 async def run_honeypot_analysis(
     message: str, 
     max_engagements: int = 5,
-    conversation_id: Optional[str] = None
+    conversation_id: Optional[str] = None,
+    conversation_history: Optional[List[Dict[str, Any]]] = None,
+    metadata: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
     Run the complete honeypot analysis workflow with Zep memory.
     
     Args:
         message: The incoming message to analyze
-        max_turns: Maximum engagement turns with scammer
+        max_engagements: Maximum engagement turns with scammer
         conversation_id: Optional conversation ID for memory continuity
+        conversation_history: Previous messages in this conversation (Section 6.2)
+        metadata: Request context (channel, language, locale) (Section 6.3)
         
     Returns:
         Final analysis response
@@ -251,6 +255,19 @@ async def run_honeypot_analysis(
     except Exception as e:
         logger.warning(f"Could not load Zep memory: {e}")
     
+    # Convert request conversation history to internal format (Section 6.2)
+    # This enables multi-turn support where prior messages inform agent behavior
+    initial_conversation_history = []
+    if conversation_history:
+        for i, msg in enumerate(conversation_history):
+            role = "scammer" if msg.get("sender") == "scammer" else "honeypot"
+            initial_conversation_history.append({
+                "role": role,
+                "message": msg.get("text", ""),
+                "turn_number": i + 1
+            })
+        logger.info(f"[{conversation_id[:8]}] Loaded {len(initial_conversation_history)} messages from request history")
+    
     # Create initial state with memory context
     initial_state = create_initial_state(
         message=message, 
@@ -258,6 +275,11 @@ async def run_honeypot_analysis(
         conversation_id=conversation_id,
         memory_context=memory_context
     )
+    
+    # Inject request conversation history into state (for multi-turn)
+    if initial_conversation_history:
+        initial_state["conversation_history"] = initial_conversation_history
+        initial_state["engagement_count"] = len([m for m in initial_conversation_history if m["role"] == "honeypot"])
     
     # Create and run workflow
     workflow = create_honeypot_workflow()
@@ -294,6 +316,67 @@ async def run_honeypot_analysis(
             
     except Exception as e:
         logger.warning(f"Could not persist failure event: {e}")
+    
+    # 9. GUVI Callback (Section 12 - MANDATORY)
+    # Send final result ONLY when:
+    # - Scam intent is confirmed (scamDetected = true)
+    # - AI Agent has completed engagement (model is satisfied and stopped)
+    # - Intelligence extraction is finished
+    try:
+        scam_detected = final_state.get("scam_detected", False)
+        engagement_complete = final_state.get("engagement_complete", False)
+        extraction_complete = final_state.get("extraction_complete", False)
+        
+        # Log the conditions for debugging
+        logger.info(f"[{conversation_id[:8]}] GUVI Callback Check:")
+        logger.info(f"  - scam_detected: {scam_detected}")
+        logger.info(f"  - engagement_complete: {engagement_complete}")
+        logger.info(f"  - extraction_complete: {extraction_complete}")
+        
+        # Only send callback when ALL conditions are met
+        if scam_detected and (engagement_complete or extraction_complete):
+            from utils.guvi_callback import send_guvi_callback, build_agent_notes
+            
+            logger.info(f"[{conversation_id[:8]}] ✅ All conditions met - Sending GUVI callback")
+            
+            entities = final_state.get("extracted_entities", {})
+            behavioral_signals = final_state.get("behavioral_signals", [])
+            scam_indicators = final_state.get("scam_indicators", [])
+            
+            # Calculate total messages: request history + current + honeypot responses
+            history_count = len(conversation_history or [])
+            engagement_count = final_state.get("engagement_count", 0)
+            total_messages = history_count + 1 + engagement_count  # history + current message + honeypot turns
+            
+            # Build agent notes
+            agent_notes = build_agent_notes(
+                scam_type=final_state.get("scam_type"),
+                behavioral_signals=behavioral_signals,
+                conversation_summary=final_state.get("conversation_summary", "")
+            )
+            
+            # Fire callback
+            callback_success = await send_guvi_callback(
+                session_id=conversation_id,
+                scam_detected=True,
+                total_messages=total_messages,
+                extracted_intelligence=entities,
+                agent_notes=agent_notes,
+                scam_indicators=scam_indicators + behavioral_signals
+            )
+            
+            if callback_success:
+                logger.info(f"[{conversation_id[:8]}] GUVI callback sent successfully")
+            else:
+                logger.warning(f"[{conversation_id[:8]}] GUVI callback failed")
+        else:
+            if scam_detected:
+                logger.info(f"[{conversation_id[:8]}] Scam detected but engagement not complete - callback deferred")
+            else:
+                logger.info(f"[{conversation_id[:8]}] Not a scam - no callback needed")
+                
+    except Exception as e:
+        logger.warning(f"GUVI callback failed (non-critical): {e}")
     
     # Return the final response
     return final_state.get("final_response", {

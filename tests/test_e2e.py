@@ -45,17 +45,19 @@ class TestHoneyPotE2E(unittest.TestCase):
         # 1. Verify Status Code
         self.assertEqual(response.status_code, 200)
         
-        # 2. Verify Valid JSON
+        # 2. Verify minimal response format per Section 8
         data = response.json()
         
-        self.assertIn("is_scam", data)
-        self.assertIn("confidence_score", data)
-        self.assertIn("extracted_entities", data)
+        self.assertIn("status", data)
+        self.assertEqual(data["status"], "success")
+        self.assertIn("reply", data)
+        # Response should ONLY have status and reply
+        self.assertEqual(set(data.keys()), {"status", "reply"})
         
         logger.info(">>> TEST PASS: Normal Scam Flow")
 
     def test_hackathon_payload_support(self):
-        """Test 2: Verify support for Hackathon Nested JSON & sessionId"""
+        """Test 2: Verify support for Hackathon Nested JSON & sessionId (Section 6)"""
         logger.info(">>> TEST START: Hackathon Payload Support")
         
         # Complex nested structure seen in Hackathon logs
@@ -67,7 +69,7 @@ class TestHoneyPotE2E(unittest.TestCase):
                 "timestamp": 1234567890
             },
             "conversationHistory": [],
-            "metadata": {"source": "SMS"}
+            "metadata": {"channel": "SMS", "language": "English", "locale": "IN"}
         }
         
         headers = {"x-api-key": self.api_key}
@@ -77,9 +79,11 @@ class TestHoneyPotE2E(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         
-        # Verify it handled the alias and nested text
-        self.assertEqual(data["conversation_id"], "hackathon-session-123")
-        self.assertTrue(data["is_scam"]) # Should detect "Pay bill now"
+        # Verify minimal response format per Section 8
+        self.assertIn("status", data)
+        self.assertEqual(data["status"], "success")
+        self.assertIn("reply", data)
+        self.assertEqual(set(data.keys()), {"status", "reply"})
         
         logger.info(">>> TEST PASS: Hackathon Payload Support")
 
@@ -99,9 +103,9 @@ class TestHoneyPotE2E(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         
-        # Verify it is NOT detected as a scam
-        self.assertFalse(data["is_scam"], "Benign message was incorrectly flagged as scam")
-        self.assertLess(data["confidence_score"], 0.5)
+        # Verify minimal response format
+        self.assertEqual(data["status"], "success")
+        self.assertEqual(set(data.keys()), {"status", "reply"})
         
         logger.info(">>> TEST PASS: Clean Message Flow")
 
@@ -127,15 +131,55 @@ class TestHoneyPotE2E(unittest.TestCase):
         self.assertEqual(resp2.status_code, 200)
         
         # 3. Trailing Slash (POST /analyze/)
-        # Should NOT fail or 307 if handled correctly
-        # Note: TestClient follows redirects by default, so we check final status
         payload = {"message": "Slash test", "conversation_id": "test-slash"}
         headers = {"x-api-key": self.api_key}
         resp3 = self.client.post("/analyze/", json=payload, headers=headers)
         self.assertEqual(resp3.status_code, 200)
-        self.assertTrue(resp3.json()["is_scam"] is not None)
+        self.assertEqual(set(resp3.json().keys()), {"status", "reply"})
             
         logger.info(">>> TEST PASS: Compatibility Endpoints")
 
+    def test_multiturn_conversation_history(self):
+        """Test 6: Multi-turn conversation with conversationHistory (Section 6.2)"""
+        logger.info(">>> TEST START: Multi-turn Conversation History")
+        
+        # Follow-up message with prior conversation history
+        payload = {
+            "sessionId": "multiturn-session-001",
+            "message": {
+                "sender": "scammer",
+                "text": "Share your UPI ID to avoid account suspension.",
+                "timestamp": 1770005529000
+            },
+            "conversationHistory": [
+                {
+                    "sender": "scammer",
+                    "text": "Your bank account will be blocked today. Verify immediately.",
+                    "timestamp": 1770005528731
+                },
+                {
+                    "sender": "user",
+                    "text": "Why will my account be blocked?",
+                    "timestamp": 1770005528900
+                }
+            ],
+            "metadata": {"channel": "SMS", "language": "English", "locale": "IN"}
+        }
+        
+        headers = {"x-api-key": self.api_key}
+        
+        response = self.client.post("/analyze", json=payload, headers=headers)
+        
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        
+        # Verify minimal response format per Section 8
+        self.assertEqual(data["status"], "success")
+        self.assertIn("reply", data)
+        self.assertEqual(set(data.keys()), {"status", "reply"})
+        
+        logger.info(">>> TEST PASS: Multi-turn Conversation History")
+
 if __name__ == "__main__":
     unittest.main()
+

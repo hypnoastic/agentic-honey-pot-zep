@@ -5,7 +5,7 @@ Loads settings from environment variables with sensible defaults.
 
 import os
 from functools import lru_cache
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -13,6 +13,11 @@ load_dotenv()
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore"
+    )
     
     # OpenAI
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
@@ -42,14 +47,10 @@ class Settings(BaseSettings):
     
     # Logging
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
-    
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        extra = "ignore"  # Allow extra environment variables
 
 
 @lru_cache()
 def get_settings() -> Settings:
     """Get cached settings instance."""
     return Settings()
+
