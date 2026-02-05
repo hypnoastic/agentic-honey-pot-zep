@@ -91,6 +91,62 @@ def planner_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     # Log turn info
     logger.info(f"Planner: Turn {turns_used}/{max_turns}, Entities extracted: {entity_count}")
 
+    # =========================================================================
+    # INLINE ENTITY SCANNING: Detect entities from conversation history
+    # This helps when entities aren't persisted across API calls
+    # =========================================================================
+    import re
+    
+    # UPI ID pattern: xxx@upi, xxx@paytm, xxx@ybl, xxx@gpay, etc.
+    upi_pattern = r'\b[a-zA-Z0-9._-]+@[a-zA-Z]+\b'
+    # Phone number pattern: 10+ digit numbers (with optional +91 prefix)
+    phone_pattern = r'(?:\+91)?[789]\d{9}\b'
+    # Bank account pattern: 9-18 digit numbers
+    bank_pattern = r'\b\d{11,18}\b'
+    # Phishing URL pattern: http/https links with suspicious domains
+    url_pattern = r'https?://[^\s<>"{}|\\^`\[\]]+'
+    
+    scanned_upis = set()
+    scanned_phones = set()
+    scanned_banks = set()
+    scanned_urls = set()
+    
+    for turn in history:
+        text = turn.get("message", "")
+        # Find UPI IDs (exclude email-like patterns)
+        upis = [u for u in re.findall(upi_pattern, text) if not u.endswith('@gmail') and not u.endswith('@email')]
+        scanned_upis.update(upis)
+        # Find phone numbers in scammer messages
+        if turn.get("role") == "scammer":
+            phones = re.findall(phone_pattern, text)
+            scanned_phones.update(phones)
+            # Find bank accounts (long digit strings)
+            banks = re.findall(bank_pattern, text)
+            scanned_banks.update(banks)
+            # Find URLs
+            urls = re.findall(url_pattern, text)
+            scanned_urls.update(urls)
+    
+    # Also scan the original message
+    scanned_upis.update([u for u in re.findall(upi_pattern, last_message) if not u.endswith('@gmail')])
+    scanned_phones.update(re.findall(phone_pattern, last_message))
+    scanned_banks.update(re.findall(bank_pattern, last_message))
+    scanned_urls.update(re.findall(url_pattern, last_message))
+    
+    # Add to entity count
+    scanned_entity_count = len(scanned_upis) + len(scanned_phones) + len(scanned_banks) + len(scanned_urls)
+    if scanned_entity_count > entity_count:
+        logger.info(f"Planner: Inline scan found {len(scanned_upis)} UPIs, {len(scanned_phones)} phones, {len(scanned_banks)} banks, {len(scanned_urls)} URLs")
+        entity_count = scanned_entity_count
+        # Update entities dict for smart completion logic
+        entities = {
+            "upi_ids": list(scanned_upis),
+            "phone_numbers": list(scanned_phones),
+            "bank_accounts": list(scanned_banks),
+            "phishing_urls": list(scanned_urls)
+        }
+
+
     # NOTE: Removed "Smart Quit" logic - LLM now decides on every turn
     # The planner should make strategic decisions, not hardcoded rules
 
@@ -116,6 +172,77 @@ def planner_agent(state: Dict[str, Any]) -> Dict[str, Any]:
             "strategy_hint": "Skipping engagement due to historically very low success rate.",
             "current_agent": "planner"
         }
+
+    # =========================================================================
+    # SMART COMPLETION LOGIC: Decide if we have enough valuable intelligence
+    # =========================================================================
+    
+    # Count valuable entities (UPI IDs, Bank Accounts, and URLs are high value)
+    bank_accounts = entities.get("bank_accounts", [])
+    upi_ids = entities.get("upi_ids", [])
+    phishing_urls = entities.get("phishing_urls", [])
+    phone_numbers = entities.get("phone_numbers", [])
+    
+    # URLs are also high-value - they're direct evidence of phishing
+    high_value_count = len(bank_accounts) + len(upi_ids) + len(phishing_urls)
+    total_entities = high_value_count + len(phone_numbers)
+    
+    # SMART EXIT CONDITIONS (balanced for early scammer dropout):
+    # 1. If we have 3+ high-value entities → exit immediately (great extraction)
+    # 2. If we have 2+ high-value entities → exit immediately (good extraction)
+    # 3. If we have 1+ high-value entity AND 3+ turns → exit (gave them a chance)
+    # 4. If we're at 60%+ of max turns with ANY entity → exit
+    # 5. Approaching max turns → must exit
+    
+    should_complete = False
+    completion_reason = ""
+    
+    if high_value_count >= 3:
+        should_complete = True
+        completion_reason = f"Extracted {high_value_count} high-value entities (UPI/Bank/URL). Excellent extraction."
+    elif high_value_count >= 2:
+        should_complete = True
+        completion_reason = f"Extracted {high_value_count} high-value entities (UPI/Bank/URL). Good extraction."
+    elif high_value_count >= 1 and turns_used >= 3:
+        should_complete = True
+        completion_reason = f"Extracted {high_value_count} entity after {turns_used} turns. Sufficient extraction."
+    elif total_entities >= 2 and turns_used >= 2:
+        # If we have 2+ total entities (including phones), also good to exit
+        should_complete = True
+        completion_reason = f"Extracted {total_entities} total entities after {turns_used} turns. Good extraction."
+    elif total_entities >= 1 and turns_used >= (max_turns * 0.6):
+        should_complete = True
+        completion_reason = f"{turns_used} turns used (60%+ of max). Have {total_entities} entities. Time to complete."
+    elif turns_used >= max_turns - 1:
+        should_complete = True
+        completion_reason = f"Approaching max turns ({turns_used}/{max_turns}). Completing engagement."
+    
+    if should_complete:
+        logger.info(f"SMART COMPLETION: {completion_reason}")
+        
+        from utils.logger import AgentLogger
+        AgentLogger.plan_decision(
+            current_turn=turns_used,
+            max_turns=max_turns,
+            decision="judge",
+            reasoning=f"SMART EXIT: {completion_reason}"
+        )
+        return {
+            "planner_action": "judge",
+            "strategy_hint": completion_reason,
+            "current_agent": "planner",
+            "extraction_complete": True,  # Signal that extraction is done
+            "extracted_entities": {
+                "bank_accounts": entities.get("bank_accounts", []),
+                "upi_ids": entities.get("upi_ids", []),
+                "phishing_urls": entities.get("phishing_urls", []),
+                "phone_numbers": entities.get("phone_numbers", [])
+            }
+        }
+    
+    # =========================================================================
+    # If no smart exit triggered, proceed to LLM-based strategic planning
+    # =========================================================================
 
 
     winning_tactics = state.get("winning_strategies", [])

@@ -95,7 +95,7 @@ def intelligence_extraction_agent(state: Dict[str, Any]) -> Dict[str, Any]:
         
         return {
             "extracted_entities": extracted_data,
-            "extraction_complete": True,
+            "extraction_complete": False,
             "current_agent": "agentic_judge" # Updated from "confidence_scoring"
         }
         
@@ -108,7 +108,7 @@ def intelligence_extraction_agent(state: Dict[str, Any]) -> Dict[str, Any]:
                 "upi_ids": [],
                 "phishing_urls": []
             },
-            "extraction_complete": True,
+            "extraction_complete": False,
             "current_agent": "agentic_judge", # Updated from "confidence_scoring"
             "error": str(e)
         }

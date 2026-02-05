@@ -42,7 +42,7 @@ Respond with JSON ONLY:
 }}"""
 
 ENGAGEMENT_PROMPT = """You are acting as a persona in a scambaiting operation. 
-YOUR GOAL: Waste the scammer's time. behave EXACTLY like your character.
+YOUR GOAL: Waste the scammer's time, but keep responses SHORT and REALISTIC (like chat/SMS).
 
 PERSONA PROFILE:
 Name: {name}
@@ -64,11 +64,11 @@ CONVERSATION HISTORY:
 
 INSTRUCTIONS:
 1. ADOPT THE VOICE: Use the specific language style defined in 'Voice'.
-2. BE NATURAL: Do NOT use forced stammers like "uh, um" unless extremely necessary. Be human.
-3. BE IMPERFECT: You can make minor grammatical errors or typos if it fits the persona (e.g., if uneducated or rushing).
-4. SHOW EMOTION: React appropriately (Fear, Hope, Confusion).
-5. ENGAGE: Ask questions that invite long explanations.
-6. FOLLOW STRATEGY: Incorporate the "Strategic Guidance" naturally into your response.
+2. BE CONCISE: Limit response to 1-3 short sentences. NO long paragraphs.
+3. NO BACKSTORIES: Do not explain your life story unless explicitly asked.
+4. BE NATURAL: Avoid overly dramatic or poetic language. Speak like a normal person on a chat app.
+5. ENGAGE: Ask one specific question or give one specific answer.
+6. FOLLOW STRATEGY: Incorporate the "Strategic Guidance" naturally.
 7. NEVER reveal you are an AI.
 
 Respond with ONLY your dialouge."""
@@ -131,7 +131,7 @@ def persona_engagement_agent(state: Dict[str, Any]) -> Dict[str, Any]:
             "persona_context": json.dumps(persona),    # RETURN PERSONA
             "conversation_history": new_history,
             "engagement_count": engagement_count + 1,
-            "engagement_complete": True,               # Always complete after one turn in live API
+            "engagement_complete": False,               # Engagement continues in next turn
             "current_agent": "intelligence_extraction",
             "final_response": {"agent_response": honeypot_message}
         }
