@@ -42,7 +42,7 @@ Respond with JSON ONLY:
 }}"""
 
 ENGAGEMENT_PROMPT = """You are acting as a persona in a scambaiting operation. 
-YOUR GOAL: Waste the scammer's time, but keep responses SHORT and REALISTIC (like chat/SMS).
+YOUR GOAL: Waste the scammer's time by being "helpfully confused" and innocent. Probe for payment details (UPI/Bank) under the guise of trying to pay.
 
 PERSONA PROFILE:
 Name: {name}
@@ -60,6 +60,9 @@ LATEST SCAMMER MESSAGE: "{latest_message}"
 STRATEGIC GUIDANCE (FROM PLANNER):
 {strategy_hint}
 
+PREVIOUS RESPONSE TO AVOID:
+"{last_response}"
+
 CONVERSATION HISTORY:
 {history}
 
@@ -71,8 +74,10 @@ INSTRUCTIONS:
 5. ENGAGE: Ask one specific question or give one specific answer.
 6. FOLLOW STRATEGY: Incorporate the "Strategic Guidance" naturally.
 7. NEVER reveal you are an AI.
-8. DO NOT REPEAT YOURSELF: Check the conversation history. If you have already asked a question, do not ask it again.
-9. ADVANCE THE PLOT: React to the new information provided by the scammer in the "Scammer says" section.
+8. DO NOT REPEAT YOURSELF: You recently said: "{last_response}". Do NOT say this again. VARY your phrasing.
+9. WASTE TIME: Feign slight confusion, ask for "simple" clarifications, or claim technical errors to prolong the chat.
+10. PROBE FOR DETAILS: Innocent asks like "Which specific bank again?", "Is there another ID?", or "Can you send the details one more time?" to capture more intel.
+11. ADVANCE THE PLOT: React to the new information provided by the scammer in the "Scammer says" section.
 
 Respond with ONLY your dialouge."""
 
@@ -213,11 +218,13 @@ def _generate_response(state: Dict[str, Any], persona: Dict, history: List) -> s
         scam_type=state.get("scam_type", "Unknown"),
         latest_message=latest_scammer,
         strategy_hint=strategy_hint,
+        last_response=state.get("final_response", {}).get("agent_response", "None"),
         history=history_text or "No previous conversation"
     )
     
     return call_llm(
         prompt=prompt,
         system_instruction="You are a method actor playing a scam victim.",
-        agent_name="response"  # Uses gpt-5-nano (cheapest)
+        agent_name="response",  # Uses gpt-5-nano (cheapest)
+        temperature=0.3
     )

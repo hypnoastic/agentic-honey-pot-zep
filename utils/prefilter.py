@@ -79,7 +79,7 @@ SCAM_PATTERNS: Dict[str, List[Tuple[str, float]]] = {
 # Entity extraction patterns
 ENTITY_PATTERNS: Dict[str, List[str]] = {
     "upi_ids": [
-        r"\b[\w\.\-]+@(?:upi|paytm|gpay|phonepe|ybl|oksbi|okaxis|okicici|okhdfcbank|axl|apl|ibl|sbi|icici|hdfc|yesbank|axisbank)\b",
+        r"\b[\w\.\-]+@(?:upi|paytm|gpay|phonepe|ybl|oksbi|okaxis|okicici|okhdfcbank|axl|apl|ibl|sbi|icici|hdfc|yesbank|axisbank|fakebank)\b",
     ],
     "bank_accounts": [
         r"\b\d{9,18}\b",
