@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     # Server
     host: str = os.getenv("HOST", "0.0.0.0")
     port: int = int(os.getenv("PORT", "8000"))
-    debug: bool = os.getenv("DEBUG", "false").lower() == "true"
+    debug: bool = os.getenv("DEBUG", "true").lower() == "true"
     
     # CORS
     cors_origins: str = os.getenv("CORS_ORIGINS", "*")
@@ -59,7 +59,7 @@ class Settings(BaseSettings):
     postgres_enabled: bool = os.getenv("POSTGRES_ENABLED", "true").lower() == "true"
     
     # Logging
-    log_level: str = os.getenv("LOG_LEVEL", "INFO")
+    log_level: str = os.getenv("LOG_LEVEL", "DEBUG")
 
 
 @lru_cache()

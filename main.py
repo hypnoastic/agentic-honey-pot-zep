@@ -16,7 +16,7 @@ from graph.workflow import run_honeypot_analysis
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=settings.log_level,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
