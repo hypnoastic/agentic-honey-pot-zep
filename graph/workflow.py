@@ -432,7 +432,9 @@ async def run_honeypot_workflow(
             engagement_complete = final_state.get("engagement_complete", False)
             extraction_complete = final_state.get("extraction_complete", False)
             
-            if scam_detected and (engagement_complete or extraction_complete):
+            error_present = final_state.get("error") is not None
+            
+            if scam_detected and (engagement_complete or extraction_complete) and not error_present:
                 from utils.guvi_callback import send_guvi_callback, build_agent_notes
                 
                 entities = final_state.get("extracted_entities", {})

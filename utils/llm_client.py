@@ -42,7 +42,8 @@ class LLMClient:
         system_instruction: Optional[str] = None, 
         json_mode: bool = False,
         model: Optional[str] = None,
-        agent_name: Optional[str] = None
+        agent_name: Optional[str] = None,
+        temperature: float = 0.0
     ) -> str:
         """
         Generate a response from OpenAI with retry logic.
@@ -77,6 +78,7 @@ class LLMClient:
                 response = self.client.chat.completions.create(
                     model=use_model,
                     messages=messages,
+                    temperature=temperature,
                     response_format={"type": "json_object"} if json_mode else None
                 )
                 return response.choices[0].message.content
@@ -125,7 +127,8 @@ def call_llm(
     prompt: str, 
     system_instruction: Optional[str] = None, 
     json_mode: bool = False,
-    agent_name: Optional[str] = None
+    agent_name: Optional[str] = None,
+    temperature: float = 0.0
 ) -> str:
     """
     Helper function to call the singleton client.
@@ -147,7 +150,8 @@ def call_llm(
         prompt=prompt, 
         system_instruction=system_instruction, 
         json_mode=json_mode,
-        agent_name=agent_name
+        agent_name=agent_name,
+        temperature=temperature
     )
 
 

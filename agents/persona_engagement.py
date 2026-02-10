@@ -225,6 +225,6 @@ def _generate_response(state: Dict[str, Any], persona: Dict, history: List) -> s
     return call_llm(
         prompt=prompt,
         system_instruction="You are a method actor playing a scam victim.",
-        agent_name="response",  # Uses gpt-5-nano (cheapest)
-        temperature=0.3
+        agent_name="response",  # Uses gpt-4o-mini
+        temperature=0.7
     )
