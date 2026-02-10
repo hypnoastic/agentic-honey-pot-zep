@@ -14,6 +14,8 @@ from config import get_settings
 from models.schemas import AnalyzeRequest, AnalyzeResponse, ExtractedEntities
 from graph.workflow import run_honeypot_analysis
 
+settings = get_settings()
+
 # Configure logging
 logging.basicConfig(
     level=settings.log_level,
@@ -21,7 +23,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-settings = get_settings()
 
 
 @asynccontextmanager

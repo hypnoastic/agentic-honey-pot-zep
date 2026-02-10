@@ -22,18 +22,18 @@ class Settings(BaseSettings):
     
     # OpenAI
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
-    openai_model: str = os.getenv("OPENAI_MODEL", "gpt-5-mini")
+    openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     openai_timeout: int = int(os.getenv("OPENAI_TIMEOUT_SECONDS", "30"))
     api_retry_attempts: int = int(os.getenv("API_RETRY_ATTEMPTS", "3"))
     
+    # Per-Agent Model Selection (GPT-5 family fallback)
     # Per-Agent Model Selection (GPT-5 family)
-    # Per-Agent Model Selection (GPT-5 family)
-    model_planner: str = os.getenv("OPENAI_MODEL_PLANNER", "gpt-5-mini")  # Best reasoning
-    model_detection: str = os.getenv("OPENAI_MODEL_DETECTION", "gpt-5-mini")
+    model_planner: str = os.getenv("OPENAI_MODEL_PLANNER", "gpt-4o-mini")  # Best reasoning
+    model_detection: str = os.getenv("OPENAI_MODEL_DETECTION", "gpt-4o-mini")
     model_persona: str = os.getenv("OPENAI_MODEL_PERSONA", "gpt-4o-mini") # Conversational
-    model_response: str = os.getenv("OPENAI_MODEL_RESPONSE", "gpt-5-nano")  # Cheapest
-    model_extraction: str = os.getenv("OPENAI_MODEL_EXTRACTION", "gpt-5-mini")
-    model_judge: str = os.getenv("OPENAI_MODEL_JUDGE", "gpt-5-mini")
+    model_response: str = os.getenv("OPENAI_MODEL_RESPONSE", "gpt-4o-mini")  # Cheapest
+    model_extraction: str = os.getenv("OPENAI_MODEL_EXTRACTION", "gpt-4o-mini")
+    model_judge: str = os.getenv("OPENAI_MODEL_JUDGE", "gpt-4o-mini")
     
     # Serper API for Internet Verification
     serper_api_key: str = os.getenv("SERPER_API_KEY", "")
