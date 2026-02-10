@@ -1,10 +1,11 @@
 """
 Scam Detection Agent
-Uses OpenAI to analyze incoming messages for scam indicators.
-Includes error handling, retry logic, and input sanitization.
+Uses LLM to analyze incoming messages for scam indicators.
+Integrates with fact-checker for internet verification of claims.
 """
 
 import json
+import asyncio
 import logging
 from typing import Dict, Any
 from utils.llm_client import call_llm
@@ -13,20 +14,19 @@ from config import get_settings
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
+
 def _sanitize_input(message: str) -> str:
     """Sanitize input to prevent prompt injection."""
-    # Limit length
     message = message[:settings.max_message_length]
-    # Remove potential prompt injection patterns
     message = message.replace("```", "")
     message = message.replace("SYSTEM:", "")
     message = message.replace("USER:", "")
     message = message.replace("ASSISTANT:", "")
     return message.strip()
 
+
 def _parse_json_safely(response_text: str) -> Dict[str, Any]:
     """Safely parse JSON response with fallback handling."""
-    # Handle markdown code blocks
     if response_text.startswith("```"):
         parts = response_text.split("```")
         if len(parts) >= 2:
@@ -40,7 +40,6 @@ def _parse_json_safely(response_text: str) -> Dict[str, Any]:
         return json.loads(response_text)
     except json.JSONDecodeError as e:
         logger.warning(f"JSON parse error: {e}, raw text: {response_text[:200]}")
-        # Return safe default
         return {
             "is_scam": False,
             "scam_type": None,
@@ -49,16 +48,16 @@ def _parse_json_safely(response_text: str) -> Dict[str, Any]:
             "reasoning": "Failed to parse AI response"
         }
 
+
 SCAM_DETECTION_PROMPT = """You are an expert scam detection system. Analyze the following message and determine if it is a scam attempt.
 
 MESSAGE TO ANALYZE:
 {message}
 
-ZEP HISTORICAL SIGNAL (Past Data):
-{zep_signal_text}
-
 CONTEXTUAL INTELLIGENCE (Similar past scams):
 {intelligence_context}
+
+{fact_check_context}
 
 Analyze for these scam indicators:
 1. LOTTERY_FRAUD: Claims of winning prizes, lotteries, or lucky draws
@@ -83,9 +82,11 @@ Respond ONLY with a valid JSON object in this exact format:
 
 Important: Respond ONLY with the JSON, no other text."""
 
+
 def scam_detection_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Analyze the incoming message for scam indicators using OpenAI.
+    Analyze the incoming message for scam indicators using GPT-5-mini.
+    Integrates fact-checker results if available.
     """
     message = state.get("original_message", "")
     prior_scams = state.get("prior_scam_types", [])
@@ -96,27 +97,37 @@ def scam_detection_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     else:
         intel_ctx = "No specific prior intelligence available."
     
-    # Format Zep Signal
-    zep_signal = state.get("zep_signal", {})
-    if zep_signal and zep_signal.get("similar_count", 0) > 0:
-        zep_signal_text = f"FOUND {zep_signal['similar_count']} similar past messages. Most common type: {zep_signal['common_type']}."
+    # Intelligence Context is already loaded into state
+    intel_ctx = "- " + "\n- ".join(prior_scams[:3]) if prior_scams else "No specific prior intelligence available."
+    
+    # Format fact-check context if available
+    fact_check_results = state.get("fact_check_results", {})
+    if fact_check_results.get("fact_checked"):
+        fact_check_context = f"""
+INTERNET VERIFICATION RESULTS:
+Status: {fact_check_results.get('overall_status', 'UNKNOWN')}
+Claims Checked: {fact_check_results.get('claims_checked', 0)}
+"""
+        for result in fact_check_results.get("results", [])[:2]:
+            fact_check_context += f"- {result.get('claim', '')}: {result.get('status', 'UNKNOWN')}\n"
     else:
-        zep_signal_text = "No strong historical signal found."
-
+        fact_check_context = ""
+    
     # Sanitize input
     message = _sanitize_input(message)
     
     prompt = SCAM_DETECTION_PROMPT.format(
-        message=message, 
-        zep_signal_text=zep_signal_text,
-        intelligence_context=intel_ctx
+        message=message,
+        intelligence_context=intel_ctx,
+        fact_check_context=fact_check_context
     )
     
     try:
         response_text = call_llm(
             prompt=prompt,
             system_instruction="You are an expert scam detection AI.",
-            json_mode=True
+            json_mode=True,
+            agent_name="detection"  # Uses gpt-5-mini
         )
         
         analysis = _parse_json_safely(response_text)
@@ -125,9 +136,13 @@ def scam_detection_agent(state: Dict[str, Any]) -> Dict[str, Any]:
         confidence = float(analysis.get("confidence", 0.0))
         scam_type = analysis.get("scam_type")
         
+        # Apply fact-check confidence boost
+        if fact_check_results.get("confidence_boost"):
+            confidence = min(1.0, max(0.0, confidence + fact_check_results["confidence_boost"]))
+        
         # Transparent Logging
         from utils.logger import AgentLogger
-        AgentLogger.scam_detected(confidence, f"Type: {scam_type}, IsScam: {is_scam}") # Added AgentLogger call
+        AgentLogger.scam_detected(confidence, f"Type: {scam_type}, IsScam: {is_scam}")
         
         # Check against threshold
         if is_scam and confidence >= settings.scam_detection_threshold:
@@ -153,7 +168,6 @@ def scam_detection_agent(state: Dict[str, Any]) -> Dict[str, Any]:
             
     except Exception as e:
         logger.error(f"Scam detection failed: {e}")
-        # Return safe default on error
         return {
             "scam_detected": False,
             "scam_type": None,

@@ -85,5 +85,13 @@ class AnalyzeResponse(BaseModel):
         default=None,
         description="The agent's reply to send to the scammer"
     )
+    scam_detected: Optional[bool] = Field(
+        default=False,
+        description="Whether a scam was detected"
+    )
+    engagement_count: Optional[int] = Field(
+        default=0,
+        description="Number of engagement turns"
+    )
 
 

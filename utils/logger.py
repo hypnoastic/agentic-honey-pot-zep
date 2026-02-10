@@ -23,8 +23,7 @@ LOG_COLORS = {
     'PERSONA':       'cyan',    # Roleplay
     'REPLY':         'green',   # Output to user
     'INTELLIGENCE':  'yellow',  # Data extraction
-    'JUDGE':         'bold_red',# Final Verdict
-    'ZEP':           'magenta'  # Memory
+    'JUDGE':         'bold_red' # Final Verdict
 }
 
 class AgentLogger:

@@ -1,7 +1,6 @@
 """
 LangGraph state schema for the Agentic Honey-Pot system.
 Defines the shared state that flows through all agents.
-Includes Zep memory context fields.
 """
 
 from typing import TypedDict, List, Optional, Dict, Any
@@ -22,7 +21,7 @@ class HoneypotState(TypedDict):
     """
     # Input
     original_message: str
-    conversation_id: str  # Unique ID for Zep session
+    conversation_id: str  # Unique ID for the conversation
     
     # Scam Detection Results
     scam_detected: bool
@@ -62,18 +61,23 @@ class HoneypotState(TypedDict):
     judge_verdict: Optional[str]   # "GUILTY", "INNOCENT", "SUSPICIOUS"
     judge_reasoning: Optional[str] # Text explanation
     
-    # Zep Memory Context (injected from prior conversations)
+    # Memory Context (injected from prior conversations)
     prior_context: Optional[str]
     prior_scam_types: List[str]
     winning_strategies: List[str]
     past_failures: List[str]
     scam_stats: Dict[str, Any]
     temporal_stats: Dict[str, Any]
-    zep_signal: Dict[str, Any]
     familiarity_score: float
     behavioral_signals: List[str]
     prior_messages: List[Dict[str, Any]]
-    zep_enabled: bool
+    
+    # Internet Verification (Serper Fact-Checker)
+    fact_check_results: Dict[str, Any]
+    
+    # Pre-Filter Results (Deterministic)
+    prefilter_result: Dict[str, Any]
+    prefilter_entities: Dict[str, Any]
     
     # System Mode
 
@@ -91,8 +95,8 @@ def create_initial_state(
     Args:
         message: The incoming message to analyze
         max_engagements: Maximum number of engagement turns with scammer
-        conversation_id: Unique conversation identifier for Zep session
-        memory_context: Pre-loaded memory context from Zep
+        conversation_id: Unique conversation identifier
+        memory_context: Pre-loaded memory context from PostgreSQL
         
     Returns:
         Initialized HoneypotState
@@ -126,9 +130,9 @@ def create_initial_state(
         persona_traits=memory.get("persona_traits", {}),
         persona_context=memory.get("persona_context", ""),
         conversation_history=[],
-        engagement_count=0,
+        engagement_count=memory.get("engagement_count", 0),
         max_engagements=max_engagements,
-        engagement_complete=False,
+        engagement_complete=memory.get("engagement_complete", False),
         
         # Extraction (merge with prior entities)
         extracted_entities={
@@ -150,16 +154,14 @@ def create_initial_state(
         current_agent="scam_detection",
         error=None,
         
-        # Zep Memory Context
-    prior_context=memory.get("conversation_summary", ""),
+        # Memory Context
+        prior_context=memory.get("conversation_summary", ""),
         prior_scam_types=memory.get("prior_scam_types", []),
         winning_strategies=memory.get("winning_strategies", []),
         past_failures=memory.get("past_failures", []),
         scam_stats=memory.get("scam_stats", {}),
         temporal_stats=memory.get("temporal_stats", {}),
-        zep_signal=memory.get("zep_signal", {}),
         familiarity_score=memory.get("familiarity_score", 0.0),
         behavioral_signals=memory.get("behavioral_signals", []),
-        prior_messages=memory.get("prior_messages", [])[:10],  # Last 10 messages
-        zep_enabled=bool(memory)
+        prior_messages=memory.get("prior_messages", [])[:10]  # Last 10 messages
     )

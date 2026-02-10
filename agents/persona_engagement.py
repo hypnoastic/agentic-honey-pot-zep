@@ -34,7 +34,7 @@ CRITICAL INSTRUCTION:
 Respond with JSON ONLY:
 {{
     "name": "Full Name (Random)",
-    "age": 45,
+    "age": 18-65,
     "occupation": "Job Title (Specific)",
     "traits": "Personality traits (e.g., Anxious, Greed, Naive)",
     "context": "Background details (e.g., living situation, financial status)",
@@ -73,13 +73,7 @@ INSTRUCTIONS:
 
 Respond with ONLY your dialouge."""
 
-# Fallback responses when Mock Scammer API is unavailable
-FALLBACK_SCAMMER_RESPONSES = [
-    {"message": "Yes sir, send Rs 500 now to activate account.", "revealed_info": {"upi_id": "scammer@paytm"}},
-    {"message": "Send photo of your ATM card front and back.", "revealed_info": None},
-    {"message": "Click this link to update KYC: http://sbi-kyc-update.net", "revealed_info": {"url": "http://sbi-kyc-update.net"}},
-    {"message": "If you don't pay, police will come to your house in 1 hour.", "revealed_info": None}
-]
+
 
 def persona_engagement_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -97,6 +91,11 @@ def persona_engagement_agent(state: Dict[str, Any]) -> Dict[str, Any]:
         AgentLogger.persona_update(persona['name'], persona['occupation'], "Persona Generated")
     
     persona = json.loads(state.get("persona_context", "{}"))
+    
+    # Sync name if missing in context (Case: Loaded from session metadata without full context)
+    if not persona.get("name") and state.get("persona_name"):
+        persona["name"] = state.get("persona_name")
+    
     conversation_history = state.get("conversation_history", [])
     engagement_count = state.get("engagement_count", 0)
     max_engagements = state.get("max_engagements", settings.max_engagement_turns)
@@ -167,7 +166,8 @@ def _generate_unique_persona(state: Dict[str, Any]) -> Dict:
         response_text = call_llm(
             prompt=prompt,
             system_instruction="You are a creative writer generating fictional character profiles.",
-            json_mode=True
+            json_mode=True,
+            agent_name="persona"  # Uses gpt-5-mini
         )
         return json.loads(response_text)
         
@@ -213,4 +213,8 @@ def _generate_response(state: Dict[str, Any], persona: Dict, history: List) -> s
         history=history_text or "No previous conversation"
     )
     
-    return call_llm(prompt=prompt, system_instruction="You are a method actor playing a scam victim.")
+    return call_llm(
+        prompt=prompt,
+        system_instruction="You are a method actor playing a scam victim.",
+        agent_name="response"  # Uses gpt-5-nano (cheapest)
+    )

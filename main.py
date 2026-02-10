@@ -1,7 +1,6 @@
 """
 Agentic Honey-Pot API Server
 FastAPI application with x-api-key authentication for scam detection and intelligence extraction.
-Includes Zep Context AI memory integration for persistent conversational context.
 """
 
 import uuid
@@ -32,9 +31,9 @@ async def lifespan(app: FastAPI):
     logger.info(f"OpenAI Model: {settings.openai_model}")
     logger.info(f"Max engagement turns: {settings.max_engagement_turns}")
     
-    # Log Zep status
-    zep_status = "enabled" if settings.zep_api_key and settings.zep_enabled else "disabled"
-    logger.info(f"Zep Context AI Memory: {zep_status}")
+    # Log Memory status
+    memory_status = "enabled" if settings.postgres_enabled and settings.database_url else "disabled"
+    logger.info(f"Neon PostgreSQL Memory: {memory_status}")
     
     yield
     logger.info("Agentic Honey-Pot API shutting down...")
@@ -42,7 +41,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Agentic Honey-Pot API",
-    description="Multi-agent scam detection and intelligence extraction system with Zep memory",
+    description="Multi-agent scam detection and intelligence extraction system with Neon PostgreSQL memory",
     version="1.1.0",
     lifespan=lifespan,
     docs_url="/docs",
@@ -116,21 +115,12 @@ def sanitize_message(message: str) -> str:
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint."""
-    # Check Zep availability
-    zep_available = False
-    try:
-        from memory.zep_memory import is_zep_available
-        zep_available = is_zep_available()
-    except ImportError:
-        pass
-    
     return {
         "status": "healthy",
         "service": "agentic-honeypot-api",
         "version": "1.1.0",
         "openai_model": settings.openai_model,
-        "zep_memory": "enabled" if zep_available else "disabled"
+        "memory_backend": "postgres" if settings.database_url else "disabled"
     }
 
 
@@ -150,7 +140,18 @@ async def analyze_message(
     GUARANTEE: Always returns a valid JSON response.
     """
     # 1. Generate ID safely
-    conversation_id = request.conversation_id or str(uuid.uuid4())
+    conversation_id = request.conversation_id
+    
+    # Validation: Ensure conversation_id is a valid UUID
+    try:
+        if conversation_id:
+            uuid.UUID(str(conversation_id))
+        else:
+            conversation_id = str(uuid.uuid4())
+    except ValueError:
+        logger.warning(f"Invalid UUID provided: {conversation_id}. Generating new one.")
+        conversation_id = str(uuid.uuid4())
+        
     request_id = conversation_id[:8]
     
     try:
@@ -248,10 +249,10 @@ async def root():
     return {
         "name": "Agentic Honey-Pot API",
         "version": "1.1.0",
-        "description": "Multi-agent scam detection and intelligence extraction with Zep memory",
+        "description": "Multi-agent scam detection and intelligence extraction with Neon PostgreSQL memory",
         "model_provider": "OpenAI",
         "features": {
-            "zep_memory": "Persistent conversational memory for multi-turn context",
+            "memory": "Persistent conversational memory (PgVector) for multi-turn context",
             "multi_agent": "LangGraph-orchestrated agent pipeline",
             "scam_detection": "Advanced LLM-based scam analysis"
         },

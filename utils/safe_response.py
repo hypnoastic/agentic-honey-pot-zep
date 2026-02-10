@@ -34,7 +34,9 @@ def construct_safe_response(result: Dict[str, Any], conversation_id: str) -> Ana
         
         return AnalyzeResponse(
             status="success",
-            reply=str(agent_reply) if agent_reply else None
+            reply=str(agent_reply) if agent_reply else None,
+            scam_detected=result.get("is_scam", False),
+            engagement_count=result.get("engagement_count", 0)
         )
     except Exception as e:
         logger.error(f"Error constructing safe response: {e}")

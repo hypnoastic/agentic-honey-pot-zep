@@ -65,7 +65,9 @@ def response_formatter_agent(state: Dict[str, Any]) -> Dict[str, Any]:
         },
         "behavioral_signals": state.get("behavioral_signals", []),
         "confidence_factors": state.get("confidence_factors", {}),
-        "conversation_summary": summary
+        "conversation_summary": summary,
+        "persona_name": state.get("persona_name"),
+        "engagement_count": state.get("engagement_count", 0)
     }
 
     # Preserve agent_response for Live Mode
@@ -100,9 +102,9 @@ def _generate_summary(state: Dict[str, Any], entities: Dict) -> str:
     prompt = SUMMARY_PROMPT.format(
         scam_type=scam_type,
         conversation=conv_text[:3000],
-        bank_accounts=", ".join(entities.get("bank_accounts", [])) or "None",
-        upi_ids=", ".join(entities.get("upi_ids", [])) or "None",
-        phishing_urls=", ".join(entities.get("phishing_urls", [])) or "None"
+        bank_accounts=", ".join([e.get("value", str(e)) if isinstance(e, dict) else str(e) for e in entities.get("bank_accounts", [])]) or "None",
+        upi_ids=", ".join([e.get("value", str(e)) if isinstance(e, dict) else str(e) for e in entities.get("upi_ids", [])]) or "None",
+        phishing_urls=", ".join([e.get("value", str(e)) if isinstance(e, dict) else str(e) for e in entities.get("phishing_urls", [])]) or "None"
     )
     
     return call_llm(prompt=prompt, system_instruction="You are an expert summarizer.")

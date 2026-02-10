@@ -31,9 +31,9 @@ graph TD
 
     Formatter --> Response[Final API Response]
 
-    subgraph Persistent Memory [Zep Context AI]
-        Zep[(Zep Cloud)] <-->|Load/Save Context| StateInit
-        Zep <-->|Persist Intelligence| Extractor
+    subgraph Persistent Memory [Neon PostgreSQL + pgvector]
+        Postgres[(Neon PostgreSQL)] <-->|Load/Save Context| StateInit
+        Postgres <-->|Persist Intelligence| Extractor
     end
 ```
 
@@ -49,12 +49,12 @@ Instead of hard-coded logic, the flow is controlled by the **Planner Agent** (`a
 - **JUDGE**: If sufficient evidence is collected or the maximum turn limit (`MAX_ENGAGEMENT_TURNS`) is reached, it routes to the Judge.
 - **END**: If the message is determined to be benign.
 
-### 2.2 Zep Memory Integration
+### 2.2 PostgreSQL Memory Integration
 
-Long-term persistence is handled by `memory/zep_memory.py`. We utilize **Zep's Graph and Thread APIs** to:
+Long-term persistence is handled by `memory/postgres_memory.py`. We utilize **PostgreSQL and pgvector** to:
 
 1.  **Context Loading**: Before processing starts, prior conversation history and extracted entities are loaded into the `HoneypotState`.
-2.  **Entity Persistence**: Extracted bank accounts and UPI IDs are stored as metadata nodes in the Zep Graph, allowing for cross-conversation correlations (e.g., identifying the same bank account used across different scams).
+2.  **Entity Persistence**: Extracted bank accounts and UPI IDs are stored in structured tables with vector embeddings, allowing for cross-conversation correlations.
 
 ## 3. Agent Implementation Details
 
@@ -88,7 +88,7 @@ The repository follows a strict Clean Architecture pattern:
 
 - **`agents/`**: Domain logic. Each agent is an independent module with its own prompt definitions and processing logic.
 - **`graph/`**: Orchestration layer. Defines the State schema and Language Graph topology.
-- **`memory/`**: Data access layer. Handles all interactions with the Zep Cloud API.
+- **`memory/`**: Data access layer. Handles all interactions with Neon PostgreSQL and pgvector for persistent state and semantic search.
 - **`models/`**: Data definitions. Pydantic schemas for API requests/responses ensuring type safety.
 - **`utils/`**: Shared infrastructure.
   - `llm_client.py`: Wrapper for model interactions (OpenAI).
@@ -100,7 +100,7 @@ The repository follows a strict Clean Architecture pattern:
 - **Runtime**: Python 3.10+
 - **Orchestration**: LangGraph (LangChain ecosystem)
 - **LLM Provider**: OpenAI `gpt-4o-mini` (Selected for latency/cost efficiency)
-- **Memory Store**: Zep Context AI (Cloud)
+- **Memory Store**: Neon PostgreSQL with `pgvector` extension
 - **API Framework**: FastAPI
 - **Validation**: Pydantic
 
@@ -116,8 +116,8 @@ OPENAI_API_KEY=sk-...         # OpenAI API Key
 OPENAI_MODEL=gpt-4o-mini      # Recommended model for logic/cost balance
 
 # Memory Infrastructure
-ZEP_API_KEY=z_...             # Zep Cloud Project Key
-ZEP_ENABLED=true              # Master toggle for memory features
+DATABASE_URL=postgres://...     # Neon PostgreSQL connection string
+POSTGRES_ENABLED=true           # Master toggle for memory features
 
 # Deployment Security
 API_SECRET_KEY=...            # Key for x-api-key header authentication
