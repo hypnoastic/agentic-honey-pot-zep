@@ -1,6 +1,6 @@
 """
 LLM Client with per-agent model selection.
-Supports GPT-5 family models: gpt-5, gpt-5-mini, gpt-5-nano
+Supports GPT-4o family models: gpt-4o, gpt-4o-mini
 """
 
 import logging
@@ -135,12 +135,12 @@ def call_llm(
         system_instruction: System instruction
         json_mode: Whether to force JSON response
         agent_name: Agent name for automatic model selection
-            - 'planner': Uses gpt-5-mini (best reasoning)
-            - 'detection': Uses gpt-5-mini
+            - 'planner': Uses gpt-4o-mini (best reasoning)
+            - 'detection': Uses gpt-3.5-turbo
             - 'persona': Uses gpt-4o-mini (conversational)
-            - 'response': Uses gpt-5-nano (fast/cheap)
-            - 'extraction': Uses gpt-5-mini
-            - 'judge': Uses gpt-5-mini
+            - 'response': Uses gpt-3.5-turbo (fast/cheap)
+            - 'extraction': Uses gpt-4o-mini
+            - 'judge': Uses gpt-4o-mini
     """
     client = get_llm_client()
     return client.generate_response(

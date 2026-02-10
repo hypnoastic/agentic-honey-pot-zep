@@ -29,9 +29,9 @@ class Settings(BaseSettings):
     # Per-Agent Model Selection (GPT-5 family fallback)
     # Per-Agent Model Selection (GPT-5 family)
     model_planner: str = os.getenv("OPENAI_MODEL_PLANNER", "gpt-4o-mini")  # Best reasoning
-    model_detection: str = os.getenv("OPENAI_MODEL_DETECTION", "gpt-4o-mini")
+    model_detection: str = os.getenv("OPENAI_MODEL_DETECTION", "gpt-3.5-turbo")
     model_persona: str = os.getenv("OPENAI_MODEL_PERSONA", "gpt-4o-mini") # Conversational
-    model_response: str = os.getenv("OPENAI_MODEL_RESPONSE", "gpt-4o-mini")  # Cheapest
+    model_response: str = os.getenv("OPENAI_MODEL_RESPONSE", "gpt-3.5-turbo")  # Cheapest
     model_extraction: str = os.getenv("OPENAI_MODEL_EXTRACTION", "gpt-4o-mini")
     model_judge: str = os.getenv("OPENAI_MODEL_JUDGE", "gpt-4o-mini")
     
