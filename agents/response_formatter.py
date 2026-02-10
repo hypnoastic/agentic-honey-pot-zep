@@ -107,7 +107,11 @@ def _generate_summary(state: Dict[str, Any], entities: Dict) -> str:
         phishing_urls=", ".join([e.get("value", str(e)) if isinstance(e, dict) else str(e) for e in entities.get("phishing_urls", [])]) or "None"
     )
     
-    return call_llm(prompt=prompt, system_instruction="You are an expert summarizer.")
+    return call_llm(
+        prompt=prompt, 
+        system_instruction="You are an expert summarizer.",
+        agent_name="response"  # Uses gpt-3.5-turbo
+    )
 
 
 def _fallback_summary(state: Dict[str, Any], entities: Dict) -> str:
