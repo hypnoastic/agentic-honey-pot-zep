@@ -135,10 +135,10 @@ def call_llm(
         system_instruction: System instruction
         json_mode: Whether to force JSON response
         agent_name: Agent name for automatic model selection
-            - 'planner': Uses gpt-4o-mini (best reasoning)
-            - 'detection': Uses gpt-3.5-turbo
-            - 'persona': Uses gpt-4o-mini (conversational)
-            - 'response': Uses gpt-3.5-turbo (fast/cheap)
+            - 'planner': Uses gpt-4o-mini
+            - 'detection': Uses gpt-4o-mini
+            - 'persona': Uses gpt-4o-mini
+            - 'response': Uses gpt-4o-mini
             - 'extraction': Uses gpt-4o-mini
             - 'judge': Uses gpt-4o-mini
     """

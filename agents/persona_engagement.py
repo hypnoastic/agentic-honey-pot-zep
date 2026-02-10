@@ -218,7 +218,7 @@ def _generate_response(state: Dict[str, Any], persona: Dict, history: List) -> s
         scam_type=state.get("scam_type", "Unknown"),
         latest_message=latest_scammer,
         strategy_hint=strategy_hint,
-        last_response=state.get("final_response", {}).get("agent_response", "None"),
+        last_response=(state.get("final_response") or {}).get("agent_response", "None"),
         history=history_text or "No previous conversation"
     )
     
