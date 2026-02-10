@@ -54,7 +54,8 @@ Voice/Style: {voice}
 
 SCAM SITUATION:
 Type: {scam_type}
-Scammer says: "{scammer_message}"
+Type: {scam_type}
+LATEST SCAMMER MESSAGE: "{latest_message}"
 
 STRATEGIC GUIDANCE (FROM PLANNER):
 {strategy_hint}
@@ -70,6 +71,8 @@ INSTRUCTIONS:
 5. ENGAGE: Ask one specific question or give one specific answer.
 6. FOLLOW STRATEGY: Incorporate the "Strategic Guidance" naturally.
 7. NEVER reveal you are an AI.
+8. DO NOT REPEAT YOURSELF: Check the conversation history. If you have already asked a question, do not ask it again.
+9. ADVANCE THE PLOT: React to the new information provided by the scammer in the "Scammer says" section.
 
 Respond with ONLY your dialouge."""
 
@@ -208,7 +211,7 @@ def _generate_response(state: Dict[str, Any], persona: Dict, history: List) -> s
         context=persona.get("context", "Unknown"),
         voice=persona.get("voice", "Natural"),
         scam_type=state.get("scam_type", "Unknown"),
-        scammer_message=latest_scammer,
+        latest_message=latest_scammer,
         strategy_hint=strategy_hint,
         history=history_text or "No previous conversation"
     )
