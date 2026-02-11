@@ -1,24 +1,25 @@
 """
-Planner Agent (with merged Judge functionality)
-"The Mastermind"
-Decides the high-level strategy, next action, AND final verdict.
+Planner Agent (Hardened - Core Logic Preserved)
 
-RESPONSIBILITIES:
-- Decide action: engage/judge/end
-- Provide strategy hints for persona
-- When action=judge: output verdict, confidence, reasoning
-
-NOT RESPONSIBLE FOR:
-- Entity extraction (handled by Intelligence Extraction)
-- Regex scanning (handled by Pre-Filter + Intelligence Extraction)
+Enhancements:
+- LLM schema validation
+- Safe action fallback (never default to judge)
+- Strict verdict authority enforcement
+- Guarded numeric casting
+- Indicator dampening (anti-spam)
+- Diversity bonus safety check
+- Immutable core logic preserved
 """
 
 import json
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Tuple
 from utils.llm_client import call_llm
 
 logger = logging.getLogger(__name__)
+
+ALLOWED_ACTIONS = {"engage", "judge", "end"}
+ALLOWED_VERDICTS = {"GUILTY", "INNOCENT", "SUSPICIOUS"}
 
 PLANNER_PROMPT = """STRATEGIC PLANNER: Waste time AND extract intelligence (Bank, UPI, URL, Phone).
 GOAL: High-efficiency extraction (3-4 turns target).
@@ -72,212 +73,194 @@ Respond with JSON ONLY:
 
 
 def planner_agent(state: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Decide the next action and strategy.
-    When action=judge, also outputs verdict, confidence, and reasoning.
-    
-    READS from state (does NOT perform extraction):
-    - extracted_entities: Set by Intelligence Extraction agent
-    - scam_detected, scam_type: Set by Scam Detection / Pre-filter
-    - conversation_history: Accumulated history
-    """
     logger.info("Planner Agent: Analyzing strategy...")
-    
-    # Initialize defaults to prevent UnboundLocalError
-    max_turns = 10
-    turns_used = 0
-    high_value_count = 0
-    total_entities = 0
-    distinct_types = 0
-    
-    # Prepare inputs
-    history = state.get("conversation_history", [])
-    recent_history = ""
-    for turn in history[-3:]:
-        role = "Honeypot" if turn["role"] == "honeypot" else "Scammer"
-        recent_history += f"{role}: {turn['message']}\n"
 
-    last_message = state.get("original_message", "")
-    if history and history[-1]["role"] == "scammer":
-        last_message = history[-1]["message"]
-
-    # =========================================================================
-    # PHASE 1: HARDEN DEFINITIONS & INVARIANTS
-    # =========================================================================
     from config import get_settings
     settings = get_settings()
-    
-    # 1. Strict Turn Cap (HARD CAP 10)
+
+    # -------------------------------------------------------------------------
+    # HARDENED STATE EXTRACTION
+    # -------------------------------------------------------------------------
+
     max_turns = min(10, state.get("max_engagements", settings.max_engagement_turns))
     turns_used = max(0, state.get("engagement_count", 0))
-    
-    # Invariant Check: Prevent infinite loops or negative turns
-    if turns_used < 0:
-        logger.error(f"INVARIANT VIOLATION: Negative turns_used ({turns_used}). Resetting to 0.")
-        turns_used = 0
-    
-    # 2. Safe Entity Definitions
-    entities = state.get("extracted_entities", {})
+
+    history = state.get("conversation_history", []) or []
+    entities = state.get("extracted_entities", {}) or {}
+
     if not isinstance(entities, dict):
-        logger.error(f"TYPE ERROR: extracted_entities is {type(entities)}, expected dict. Defaulting to empty.")
+        logger.error("Invalid extracted_entities type. Resetting.")
         entities = {}
-        
-    bank_list = [e.get("value", e) if isinstance(e, dict) else e for e in entities.get("bank_accounts", [])]
-    upi_list = [e.get("value", e) if isinstance(e, dict) else e for e in entities.get("upi_ids", [])]
-    url_list = [e.get("value", e) if isinstance(e, dict) else e for e in entities.get("phishing_urls", [])]
-    phone_list = [e.get("value", e) if isinstance(e, dict) else e for e in entities.get("phone_numbers", [])]
-    
-    # 3. High-Value Derived Stats
+
+    # -------------------------------------------------------------------------
+    # SAFE ENTITY FLATTENING
+    # -------------------------------------------------------------------------
+
+    def safe_values(key):
+        values = []
+        for e in entities.get(key, []):
+            if isinstance(e, dict):
+                values.append(e.get("value"))
+            else:
+                values.append(e)
+        return [v for v in values if v]
+
+    bank_list = safe_values("bank_accounts")
+    upi_list = safe_values("upi_ids")
+    url_list = safe_values("phishing_urls")
+    phone_list = safe_values("phone_numbers")
+
     high_value_count = len(bank_list) + len(upi_list) + len(url_list)
     total_entities = high_value_count + len(phone_list)
-    
-    # Calculate Identity Diversity
-    distinct_types = 0
-    if bank_list: distinct_types += 1
-    if upi_list: distinct_types += 1
-    if url_list: distinct_types += 1
-    if phone_list: distinct_types += 1
-    
-    # Invariant Check: Diversity max is 4
-    if distinct_types > 4:
-        logger.warning(f"INVARIANT WARNING: distinct_types ({distinct_types}) > 4 categories. Capping at 4.")
-        distinct_types = 4
-    
-    logger.info(f"Planner [Hardened]: Turn {turns_used}/{max_turns}, Yield: {high_value_count} (across {distinct_types} types), Total: {total_entities}")
 
-    # =========================================================================
-    # DYNAMIC EXIT POLICY (Diversity Aware)
-    # =========================================================================
+    distinct_types = sum(bool(lst) for lst in [bank_list, upi_list, url_list, phone_list])
+    distinct_types = min(4, distinct_types)
+
+    # -------------------------------------------------------------------------
+    # SMART EXIT (UNCHANGED LOGIC)
+    # -------------------------------------------------------------------------
+
     should_complete, completion_reason = _check_smart_exit(
         high_value_count, total_entities, turns_used, max_turns, distinct_types
     )
-    
+
     if should_complete:
-        logger.info(f"POLICY EXIT TRIGGERED: {completion_reason}")
-        
-        # Determine verdict based on evidence strength and diversity
         verdict, confidence, reasoning = _determine_verdict(
             state, entities, high_value_count, distinct_types
         )
-            
-        from utils.logger import AgentLogger
-        AgentLogger.plan_decision(
-            current_turn=turns_used,
-            max_turns=max_turns,
-            decision="judge",
-            reasoning=f"POLICY EXIT: {completion_reason}"
-        )
-        
+
         return {
             "planner_action": "judge",
             "strategy_hint": completion_reason,
             "judge_verdict": verdict,
             "confidence_score": confidence,
             "judge_reasoning": reasoning,
-            "scam_detected": verdict in ["GUILTY", "SUSPICIOUS"],
+            "scam_detected": verdict in {"GUILTY", "SUSPICIOUS"},
             "engagement_complete": True,
             "extraction_complete": True,
             "current_agent": "planner"
         }
-    
-    # =========================================================================
-    # LLM-BASED PLANNING
-    # =========================================================================
-    winning_tactics = state.get("winning_strategies", [])
-    tactics_str = "- " + "\n- ".join(winning_tactics) if winning_tactics else "No specific tactics."
 
-    failures = state.get("past_failures", [])
-    failures_str = "- " + "\n- ".join(failures) if failures else "No failures to avoid."
+    # -------------------------------------------------------------------------
+    # LLM PLANNING (HARDENED)
+    # -------------------------------------------------------------------------
 
-    # Temporal Pacing
-    temporal = state.get("temporal_stats", {})
-    avg_turns = temporal.get("avg_turns", 4.0)
-    sample_size = temporal.get("sample_size", 0)
-    
-    if sample_size > 2:
-        if turns_used < avg_turns - 1:
-            pacing_info = f"AVG SUCCESS AT TURN {avg_turns}. Currently Turn {turns_used}. STALL."
-        elif turns_used >= avg_turns:
-            pacing_info = f"AVG SUCCESS AT TURN {avg_turns}. Currently Turn {turns_used}. EXTRACT NOW."
-        else:
-            pacing_info = f"Approaching optimal turn ({avg_turns}). Prepare to pivot."
-    else:
-        pacing_info = "No historical pacing data. Use judgement."
-
-    prompt = PLANNER_PROMPT.format(
-        scam_detected=state.get("scam_detected", False),
-        scam_type=state.get("scam_type", "Unknown"),
-        turns_used=turns_used,
-        max_turns=max_turns,
-        extracted_count=high_value_count,
-        temporal_pacing_info=pacing_info,
-        familiarity_score=state.get("familiarity_score", 0.0),
-        recent_history=recent_history or "No history yet",
-        winning_strategies=tactics_str,
-        past_failures=failures_str,
-        latest_message=last_message,
-        bank_accounts=bank_list[:3],
-        upi_ids=upi_list[:3],
-        phishing_urls=url_list[:3],
-        scam_indicators=state.get("scam_indicators", [])[:5]
-    )
+    prompt = _build_prompt(state, turns_used, max_turns, high_value_count,
+                           bank_list, upi_list, url_list)
 
     try:
         response_text = call_llm(
             prompt=prompt,
-            system_instruction="You are a strategic AI planner for a scambaiting system.",
+            system_instruction="You are a strategic AI planner.",
             json_mode=True,
             agent_name="planner"
         )
-        
+
         plan = json.loads(response_text)
-        action = plan.get("action", "judge")
-        hint = plan.get("strategy_hint", "Continue engagement")
-        
-        # Extract verdict if action is judge
-        verdict = plan.get("verdict")
-        confidence = plan.get("confidence_score")
-        reasoning = plan.get("reasoning")
-        
-        from utils.logger import AgentLogger
-        AgentLogger.plan_decision(
-            current_turn=turns_used,
-            max_turns=max_turns,
-            decision=action,
-            reasoning=hint
-        )
-        
-        result = {
-            "planner_action": action,
-            "strategy_hint": hint,
-            "current_agent": "planner"
-        }
-        
-        # If judging, include verdict
-        if action == "judge":
-            result["judge_verdict"] = verdict or "SUSPICIOUS"
-            result["confidence_score"] = float(confidence) if confidence else 0.7
-            result["judge_reasoning"] = reasoning or "Concluded based on evidence."
-            result["scam_detected"] = verdict in ["GUILTY", "SUSPICIOUS", None]
-            result["engagement_complete"] = True
-            result["extraction_complete"] = True
-        
-        return result
 
     except Exception as e:
-        logger.error(f"Planner failed: {e}")
-        return {
-            "planner_action": "judge",
-            "strategy_hint": "Error in planning, finishing up.",
-            "judge_verdict": "SUSPICIOUS",
-            "confidence_score": 0.5,
-            "judge_reasoning": f"Planner error: {e}",
+        logger.error(f"Planner LLM failed: {e}")
+        return _safe_fallback()
+
+    # -------------------------------------------------------------------------
+    # STRICT SCHEMA ENFORCEMENT
+    # -------------------------------------------------------------------------
+
+    action = plan.get("action")
+    if action not in ALLOWED_ACTIONS:
+        logger.warning(f"Invalid action from LLM: {action}. Defaulting to engage.")
+        action = "engage"
+
+    strategy_hint = plan.get("strategy_hint", "Continue engagement.")
+
+    result = {
+        "planner_action": action,
+        "strategy_hint": strategy_hint,
+        "current_agent": "planner"
+    }
+
+    # -------------------------------------------------------------------------
+    # VERDICT AUTHORITY HARDENING
+    # LLM can decide WHEN to judge.
+    # System decides WHAT the verdict is.
+    # -------------------------------------------------------------------------
+
+    if action == "judge":
+        verdict, confidence, reasoning = _determine_verdict(
+            state, entities, high_value_count, distinct_types
+        )
+
+        result.update({
+            "judge_verdict": verdict,
+            "confidence_score": confidence,
+            "judge_reasoning": reasoning,
+            "scam_detected": verdict in {"GUILTY", "SUSPICIOUS"},
             "engagement_complete": True,
-            "error": str(e)
-        }
+            "extraction_complete": True
+        })
+
+    return result
 
 
-def _check_smart_exit(high_value: int, total: int, turns: int, max_turns: int, distinct_types: int) -> tuple:
+# =============================================================================
+# HARDENED VERDICT (CORE LOGIC PRESERVED)
+# =============================================================================
+
+def _determine_verdict(state: Dict,
+                       entities: Dict,
+                       high_value: int,
+                       distinct_types: int) -> Tuple[str, float, str]:
+
+    scam_detected = state.get("scam_detected", False)
+    scam_type = state.get("scam_type", "Unknown")
+    indicators = state.get("scam_indicators", []) or []
+
+    if not scam_detected and not indicators and high_value == 0:
+        return "INNOCENT", 0.5, "No evidence detected."
+
+    base_confidence = 0.65 if scam_detected else 0.45
+
+    # Diversity bonus (unchanged logic, but guarded)
+    diversity_bonus = 0
+    if high_value >= 1 and distinct_types > 0:
+        diversity_bonus = min(0.2, (distinct_types - 1) * 0.07)
+
+    # Count bonus (unchanged)
+    count_bonus = min(0.15, high_value * 0.03)
+
+    # Indicator dampening (anti-spam refinement)
+    indicator_bonus = min(0.05, 0.02 * (len(indicators) ** 0.5))
+
+    raw_confidence = base_confidence + diversity_bonus + count_bonus + indicator_bonus
+    confidence = max(0.0, min(0.99, raw_confidence))
+
+    if confidence >= 0.8:
+        verdict = "GUILTY"
+    elif confidence >= 0.6:
+        verdict = "SUSPICIOUS"
+    else:
+        verdict = "INNOCENT"
+
+    if not scam_detected and verdict == "GUILTY":
+        verdict = "SUSPICIOUS"
+        confidence = min(confidence, 0.79)
+
+    reasoning = (
+        f"Hardened Confidence {confidence:.2f} | "
+        f"Detection: {scam_detected} ({scam_type}) | "
+        f"Yield: {high_value} | "
+        f"Diversity: {distinct_types} | "
+        f"Indicators: {len(indicators)}"
+    )
+
+    return verdict, confidence, reasoning
+
+
+# =============================================================================
+# SAFE FALLBACK
+# =============================================================================
+
+def _check_smart_exit(high_value: int, total: int, turns: int, max_turns: int, distinct_types: int) -> Tuple[bool, str]:
     """
     Refined Diversity-Aware Exit Strategy:
     - Turn 0:    >=3 high-value AND >=2 distinct types
@@ -309,58 +292,62 @@ def _check_smart_exit(high_value: int, total: int, turns: int, max_turns: int, d
     return False, ""
 
 
-def _determine_verdict(state: Dict, entities: Dict, high_value: int, distinct_types: int) -> tuple:
-    """
-    Evidence-based verdict calibration (Hardened).
-    Confidence derived from: Detection status, Count, Diversity, and Indicators.
-    
-    Guards:
-    - If scam_detected is False, verdict can NEVER be GUILTY.
-    - Confidence is strictly capped at 0.99.
-    """
-    scam_detected = state.get("scam_detected", False)
-    scam_type = state.get("scam_type", "Unknown")
-    indicators = state.get("scam_indicators", [])
-    
-    # 1. Base Verdict Determination
-    if not scam_detected and not indicators and high_value == 0:
-        return "INNOCENT", 0.5, "No evidence of scam detected by system sensors."
+def _build_prompt(state: Dict[str, Any], turns_used: int, max_turns: int, high_value_count: int,
+                  bank_list: list, upi_list: list, url_list: list) -> str:
+    """Prepare inputs and build the LLM prompt."""
+    history = state.get("conversation_history", [])
+    recent_history = ""
+    for turn in history[-3:]:
+        role = "Honeypot" if turn["role"] == "honeypot" else "Scammer"
+        recent_history += f"{role}: {turn['message']}\n"
 
-    # 2. Base Confidence [0.4 - 0.6]
-    # Detection is the strongest signal, but not sufficient for 0.9+ alone
-    base_confidence = 0.65 if scam_detected else 0.45
+    last_message = state.get("original_message", "")
+    if history and history[-1]["role"] == "scammer":
+        last_message = history[-1]["message"]
+
+    winning_tactics = state.get("winning_strategies", [])
+    tactics_str = "- " + "\n- ".join(winning_tactics) if winning_tactics else "No specific tactics."
+
+    failures = state.get("past_failures", [])
+    failures_str = "- " + "\n- ".join(failures) if failures else "No failures to avoid."
+
+    # Temporal Pacing
+    temporal = state.get("temporal_stats", {})
+    avg_turns = temporal.get("avg_turns", 4.0)
+    sample_size = temporal.get("sample_size", 0)
     
-    # 3. Evidence Strength Boosts (Additive)
-    # Diversity: 0.05 per extra category (up to +0.2)
-    diversity_bonus = min(0.2, (distinct_types - 1) * 0.07) if distinct_types > 0 else 0
-    
-    # Count: 0.03 per high-value entity (up to +0.15)
-    count_bonus = min(0.15, high_value * 0.03)
-    
-    # Indicators: 0.01 per indicator (up to +0.05)
-    indicator_bonus = min(0.05, len(indicators) * 0.01)
-    
-    # Final Calculation
-    raw_confidence = base_confidence + diversity_bonus + count_bonus + indicator_bonus
-    confidence = max(0.0, min(0.99, raw_confidence))
-    
-    # 4. Final Verdict and Detection Guard
-    if confidence >= 0.8:
-        verdict = "GUILTY"
-    elif confidence >= 0.6:
-        verdict = "SUSPICIOUS"
+    if sample_size > 2:
+        if turns_used < avg_turns - 1:
+            pacing_info = f"AVG SUCCESS AT TURN {avg_turns}. Currently Turn {turns_used}. STALL."
+        elif turns_used >= avg_turns:
+            pacing_info = f"AVG SUCCESS AT TURN {avg_turns}. Currently Turn {turns_used}. EXTRACT NOW."
+        else:
+            pacing_info = f"Approaching optimal turn ({avg_turns}). Prepare to pivot."
     else:
-        verdict = "INNOCENT"
-        
-    # DETECTION GUARD: If system didn't flag it as a scam, we cannot declare it GUILTY
-    if not scam_detected and verdict == "GUILTY":
-        logger.warning("DETECTION GUARD: Confidence suggested GUILTY but scam_detected is False. Downgrading to SUSPICIOUS.")
-        verdict = "SUSPICIOUS"
-        confidence = min(0.79, confidence)
-        
-    reasoning = (f"Hardened Confidence {confidence:.2f} | "
-                 f"Detection: {scam_detected} ({scam_type}) | "
-                 f"Yield: {high_value} entities ({distinct_types} categories) | "
-                 f"Indicators: {len(indicators)}")
-                 
-    return verdict, confidence, reasoning
+        pacing_info = "No historical pacing data. Use judgement."
+
+    return PLANNER_PROMPT.format(
+        scam_detected=state.get("scam_detected", False),
+        scam_type=state.get("scam_type", "Unknown"),
+        turns_used=turns_used,
+        max_turns=max_turns,
+        extracted_count=high_value_count,
+        temporal_pacing_info=pacing_info,
+        familiarity_score=state.get("familiarity_score", 0.0),
+        recent_history=recent_history or "No history yet",
+        winning_strategies=tactics_str,
+        past_failures=failures_str,
+        latest_message=last_message,
+        bank_accounts=bank_list[:3],
+        upi_ids=upi_list[:3],
+        phishing_urls=url_list[:3],
+        scam_indicators=state.get("scam_indicators", [])[:5]
+    )
+
+
+def _safe_fallback() -> Dict[str, Any]:
+    return {
+        "planner_action": "engage",
+        "strategy_hint": "Fallback due to planning error. Continue engagement safely.",
+        "current_agent": "planner"
+    }

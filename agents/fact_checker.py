@@ -212,10 +212,17 @@ def build_search_query(claim: Dict[str, str]) -> str:
     return f"{text} {suffix}"
 
 
+TRUSTED_DOMAIN_SUFFIXES = [".gov.in", ".nic.in", "rbi.org.in", "incometax.gov.in"]
+SCAM_INDICATOR_KEYWORDS = ["scam", "fraud", "fake", "warning", "beware", "alert", "hoax", "phishing", "malicious"]
+LEGIT_INDICATOR_KEYWORDS = ["official", "government", "authorized", "genuine", "original"]
+
 async def verify_claim(claim: Dict[str, str]) -> Dict[str, Any]:
-    """Verify a single claim using internet search."""
+    """
+    Verify a single claim using internet search.
+    HARDENED: Domain trust → Rank weighting → Confidence score.
+    """
     query = build_search_query(claim)
-    results = await search_serper(query, num_results=3)
+    results = await search_serper(query, num_results=5) # More results for better data
     
     if not results:
         return {
@@ -223,54 +230,88 @@ async def verify_claim(claim: Dict[str, str]) -> Dict[str, Any]:
             "type": claim["type"],
             "verified": None,
             "status": "UNKNOWN",
+            "confidence": 0.0,
             "reason": "No search results",
             "sources": []
         }
     
-    # Score results
-    scam_indicators = ["scam", "fraud", "fake", "warning", "beware", "alert", "hoax", "phishing"]
-    legit_indicators = ["official", "government", ".gov.in", "rbi.org", "incometax.gov", "nic.in"]
-    
-    scam_score = 0
-    legit_score = 0
+    scam_score = 0.0
+    legit_score = 0.0
     sources = []
     
-    for result in results:
+    for i, result in enumerate(results):
+        # Rank weighting: top results have more weight (1.0, 0.8, 0.6, etc.)
+        rank_weight = max(0.2, 1.0 - (i * 0.2))
+        
         text = (result["title"] + " " + result["snippet"]).lower()
         link = result["link"].lower()
         
-        for ind in scam_indicators:
-            if ind in text:
-                scam_score += 1
-                
-        for ind in legit_indicators:
-            if ind in text or ind in link:
-                legit_score += 2  # Weight official sources higher
+        # 1. Domain Trust Scoring (High Authority)
+        domain_legit = False
+        for suffix in TRUSTED_DOMAIN_SUFFIXES:
+            # Strict domain matching to prevent spoofing (e.g., mysite.gov.in.xyz)
+            if link.endswith(suffix) or f"{suffix}/" in link:
+                legit_score += 5.0 * rank_weight
+                domain_legit = True
+                break
         
+        # 2. Keyword Scoring (Low Authority - easily gamed)
+        for kw in SCAM_INDICATOR_KEYWORDS:
+            if kw in text:
+                scam_score += 1.0 * rank_weight
+                
+        for kw in LEGIT_INDICATOR_KEYWORDS:
+            if kw in text:
+                # If it's a trusted domain, don't double count much, but reinforce
+                legit_score += (0.5 if domain_legit else 1.0) * rank_weight
+        
+        # 3. Domain Red Flags
+        if any(link.endswith(ext) for ext in [".xyz", ".top", ".site", ".online", ".zip"]):
+             scam_score += 1.0 * rank_weight
+
         sources.append({
             "title": result["title"][:100],
             "url": result["link"]
         })
     
+    # Calculate Confidence (0-1)
+    # Based on the margin between scores normalized by total evidence
+    total_score = scam_score + legit_score
+    if total_score > 0:
+        margin = abs(scam_score - legit_score)
+        confidence = min(1.0, margin / (total_score * 0.5 + 1.0))
+    else:
+        confidence = 0.0
+
     # Determine verdict
-    if scam_score > legit_score + 1:
+    margin = abs(scam_score - legit_score)
+    
+    if scam_score > legit_score + 1.5:
         status = "LIKELY_SCAM"
         verified = False
-        reason = f"Found {scam_score} scam indicators vs {legit_score} legitimate"
-    elif legit_score > scam_score + 1:
+        reason = f"Strong scam indicators found ({scam_score:.1f} vs {legit_score:.1f})"
+    elif legit_score > scam_score + 1.5:
         status = "POSSIBLY_LEGITIMATE"
         verified = True
-        reason = f"Found {legit_score} legitimate indicators vs {scam_score} scam"
+        reason = f"Verified via official or authoritative sources ({legit_score:.1f} vs {scam_score:.1f})"
+    elif total_score > 1.5:
+        # Significant evidence on both sides or mixed signals
+        status = "SUSPICIOUS"
+        verified = None
+        reason = f"Mixed signals detected ({scam_score:.1f} scam vs {legit_score:.1f} legit)"
+        confidence = max(confidence, 0.4)
     else:
         status = "INCONCLUSIVE"
         verified = None
-        reason = "Could not determine legitimacy"
+        reason = "Limited or contradictory information available"
+        confidence = min(confidence, 0.4)
     
     return {
         "claim": claim["text"],
         "type": claim["type"],
         "verified": verified,
         "status": status,
+        "confidence": round(confidence, 2),
         "reason": reason,
         "sources": sources[:2]
     }
@@ -314,11 +355,18 @@ async def fact_check_message(message: str) -> Dict[str, Any]:
     
     # STEP 4: Calculate overall assessment
     scam_count = sum(1 for r in valid_results if r.get("status") == "LIKELY_SCAM")
+    suspicious_count = sum(1 for r in valid_results if r.get("status") == "SUSPICIOUS")
     legit_count = sum(1 for r in valid_results if r.get("status") == "POSSIBLY_LEGITIMATE")
+    
+    # Calculate average confidence
+    avg_confidence = sum(r.get("confidence", 0) for r in valid_results) / len(valid_results) if valid_results else 0.0
     
     if scam_count > 0:
         overall_status = "CLAIMS_LIKELY_FRAUDULENT"
-        confidence_boost = 0.15
+        confidence_boost = min(0.2, avg_confidence * 0.3)
+    elif suspicious_count > 0:
+        overall_status = "CLAIMS_SUSPICIOUS"
+        confidence_boost = min(0.1, avg_confidence * 0.15)
     elif legit_count == len(valid_results) and valid_results:
         overall_status = "CLAIMS_APPEAR_LEGITIMATE"
         confidence_boost = -0.1
@@ -326,11 +374,12 @@ async def fact_check_message(message: str) -> Dict[str, Any]:
         overall_status = "CLAIMS_INCONCLUSIVE"
         confidence_boost = 0.0
     
-    logger.info(f"FACT-CHECK COMPLETE: {overall_status}")
+    logger.info(f"FACT-CHECK COMPLETE: {overall_status} (Conf: {avg_confidence:.2f})")
     
     return {
         "fact_checked": True,
         "overall_status": overall_status,
+        "confidence_score": round(avg_confidence, 2),
         "confidence_boost": confidence_boost,
         "claims_checked": len(valid_results),
         "results": valid_results

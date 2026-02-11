@@ -1,7 +1,9 @@
 """
-Response Formatter Agent
-Formats the final structured JSON response using Gemini for summary generation.
-Includes error handling, retry logic, and safe JSON parsing.
+Response Formatter Agent (Production Optimized)
+- Gemini Flash Summary
+- Low token usage
+- Deterministic
+- Safe fallbacks
 """
 
 import json
@@ -13,32 +15,50 @@ from config import get_settings
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
-SUMMARY_PROMPT = """Summarize this scam engagement (2-3 sentences).
-Focus on: Scam type, tactics, and intelligence gathered. Concise and factual."""
 
+# =========================================================
+# SUMMARY PROMPT (STRUCTURED + TOKEN EFFICIENT)
+# =========================================================
+
+SUMMARY_PROMPT = """Summarize the scam engagement in 2-3 concise sentences.
+
+SCAM TYPE: {scam_type}
+
+RECENT CONVERSATION:
+{conversation}
+
+EXTRACTED INTELLIGENCE:
+- Bank Accounts: {bank_accounts}
+- UPI IDs: {upi_ids}
+- URLs: {phishing_urls}
+
+Focus on:
+• Scam tactic
+• Social engineering behavior
+• What intelligence was captured
+
+Be factual and professional.
+"""
+
+
+# =========================================================
+# MAIN AGENT
+# =========================================================
 
 def response_formatter_agent(state: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Format the final response with all gathered intelligence.
-    """
-    
+
     is_scam = state.get("scam_detected", False)
-    scam_type = state.get("scam_type")
-    confidence = state.get("confidence_score", 0.0)
-    entities = state.get("extracted_entities", {
-        "bank_accounts": [],
-        "upi_ids": [],
-        "phishing_urls": []
-    })
-    
+    scam_type = state.get("scam_type", "Unknown")
+    confidence = float(state.get("confidence_score", 0.0))
+
+    entities = state.get("extracted_entities", {}) or {}
+
     try:
-        # Generate conversation summary using Gemini
         summary = _generate_summary(state, entities)
     except Exception as e:
         logger.error(f"Summary generation failed: {e}")
         summary = _fallback_summary(state, entities)
-    
-    # Build final response
+
     final_response = {
         "scam_detected": is_scam,
         "scam_type": scam_type,
@@ -53,15 +73,9 @@ def response_formatter_agent(state: Dict[str, Any]) -> Dict[str, Any]:
         "conversation_summary": summary,
         "persona_name": state.get("persona_name"),
         "engagement_count": state.get("engagement_count", 0),
-        "reply": (state.get("final_response") or {}).get("agent_response")  # Safely handle None
+        "reply": (state.get("final_response") or {}).get("agent_response")
     }
 
-    # Preserve agent_response for Live Mode
-    prior_final = state.get("final_response")
-    
-    if prior_final and isinstance(prior_final, dict) and "agent_response" in prior_final:
-        final_response["agent_response"] = prior_final["agent_response"]
-    
     return {
         "conversation_summary": summary,
         "final_response": final_response,
@@ -69,64 +83,92 @@ def response_formatter_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+# =========================================================
+# SUMMARY GENERATION (TOKEN SAFE)
+# =========================================================
+
 def _generate_summary(state: Dict[str, Any], entities: Dict) -> str:
-    """Generate a concise conversation summary using OpenAI."""
-    is_scam = state.get("scam_detected", False)
+
+    if not state.get("scam_detected", False):
+        return "Message analyzed and determined to be non-malicious."
+
     scam_type = state.get("scam_type", "Unknown")
     conversation_history = state.get("conversation_history", [])
-    
-    # If not a scam, return simple message
-    if not is_scam:
-        return "Message analyzed and determined to be non-malicious. No scam indicators detected."
-    
-    # Format conversation for AI
-    conv_text = f"Original message: {state.get('original_message', '')}\n\n"
-    for turn in conversation_history:
+
+    # ✅ Only last 6 turns (token safe)
+    recent_history = conversation_history[-6:]
+
+    conv_lines = []
+    for turn in recent_history:
         role = "Honeypot" if turn.get("role") == "honeypot" else "Scammer"
-        conv_text += f"{role}: {turn.get('message', '')}\n"
-    
+        conv_lines.append(f"{role}: {turn.get('message', '')}")
+
+    conv_text = "\n".join(conv_lines)
+
+    bank_accounts = _flatten_entities(entities.get("bank_accounts", []))
+    upi_ids = _flatten_entities(entities.get("upi_ids", []))
+    phishing_urls = _flatten_entities(entities.get("phishing_urls", []))
+
     prompt = SUMMARY_PROMPT.format(
         scam_type=scam_type,
-        conversation=conv_text[:3000],
-        bank_accounts=", ".join([e.get("value", str(e)) if isinstance(e, dict) else str(e) for e in entities.get("bank_accounts", [])]) or "None",
-        upi_ids=", ".join([e.get("value", str(e)) if isinstance(e, dict) else str(e) for e in entities.get("upi_ids", [])]) or "None",
-        phishing_urls=", ".join([e.get("value", str(e)) if isinstance(e, dict) else str(e) for e in entities.get("phishing_urls", [])]) or "None"
-    )
-    
-    return call_llm(
-        prompt=prompt, 
-        system_instruction="You are an expert summarizer.",
-        agent_name="response"
+        conversation=conv_text,
+        bank_accounts=", ".join(bank_accounts) or "None",
+        upi_ids=", ".join(upi_ids) or "None",
+        phishing_urls=", ".join(phishing_urls) or "None"
     )
 
+    return call_llm(
+        prompt=prompt,
+        system_instruction="You are a cybersecurity analyst summarizing scam intelligence.",
+        agent_name="summary",  # ✅ Separate model name in .env
+        temperature=0.2        # ✅ Deterministic
+    )
+
+
+# =========================================================
+# FALLBACK SUMMARY
+# =========================================================
 
 def _fallback_summary(state: Dict[str, Any], entities: Dict) -> str:
-    """Generate fallback summary when LLM is unavailable."""
-    is_scam = state.get("scam_detected", False)
+
     scam_type = state.get("scam_type", "Unknown")
     conversation_history = state.get("conversation_history", [])
-    
-    if not is_scam:
-        return "Message analyzed and determined to be non-malicious. No scam indicators detected."
-    
+
+    if not state.get("scam_detected", False):
+        return "Message analyzed and determined to be non-malicious."
+
     parts = [f"Detected {scam_type} scam attempt."]
-    
+
     if conversation_history:
-        parts.append(f"Engaged scammer over {len(conversation_history)} conversation turns.")
-    
-    entity_parts = []
+        parts.append(f"{len(conversation_history)} conversation turns recorded.")
+
     bank_count = len(entities.get("bank_accounts", []))
     upi_count = len(entities.get("upi_ids", []))
     url_count = len(entities.get("phishing_urls", []))
-    
+
+    extracted = []
     if bank_count:
-        entity_parts.append(f"{bank_count} bank account(s)")
+        extracted.append(f"{bank_count} bank account(s)")
     if upi_count:
-        entity_parts.append(f"{upi_count} UPI ID(s)")
+        extracted.append(f"{upi_count} UPI ID(s)")
     if url_count:
-        entity_parts.append(f"{url_count} phishing URL(s)")
-    
-    if entity_parts:
-        parts.append(f"Extracted: {', '.join(entity_parts)}.")
-    
+        extracted.append(f"{url_count} phishing URL(s)")
+
+    if extracted:
+        parts.append("Extracted: " + ", ".join(extracted) + ".")
+
     return " ".join(parts)
+
+
+# =========================================================
+# HELPER
+# =========================================================
+
+def _flatten_entities(entity_list):
+    flattened = []
+    for e in entity_list:
+        if isinstance(e, dict):
+            flattened.append(str(e.get("value", "")))
+        else:
+            flattened.append(str(e))
+    return flattened
