@@ -158,7 +158,6 @@ async def intelligence_extraction_agent(state: Dict[str, Any]) -> Dict[str, Any]
     
     return {
         "extracted_entities": final_entities,
-        "extraction_complete": True,
         "current_agent": "planner"  # Loop back to planner (Judge merged)
     }
 
@@ -230,6 +229,5 @@ def regex_only_extraction_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     
     return {
         "extracted_entities": final_entities,
-        "extraction_complete": True,
         "current_agent": "planner"
     }
