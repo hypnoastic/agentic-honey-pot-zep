@@ -10,6 +10,7 @@ import logging
 from typing import Dict, Any
 from utils.llm_client import call_llm
 from config import get_settings
+from utils.parsing import parse_json_safely
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -25,28 +26,6 @@ def _sanitize_input(message: str) -> str:
     return message.strip()
 
 
-def _parse_json_safely(response_text: str) -> Dict[str, Any]:
-    """Safely parse JSON response with fallback handling."""
-    if response_text.startswith("```"):
-        parts = response_text.split("```")
-        if len(parts) >= 2:
-            response_text = parts[1]
-            if response_text.startswith("json"):
-                response_text = response_text[4:]
-    
-    response_text = response_text.strip()
-    
-    try:
-        return json.loads(response_text)
-    except json.JSONDecodeError as e:
-        logger.warning(f"JSON parse error: {e}, raw text: {response_text[:200]}")
-        return {
-            "is_scam": False,
-            "scam_type": None,
-            "confidence": 0.0,
-            "indicators": [],
-            "reasoning": "Failed to parse AI response"
-        }
 
 
 SCAM_DETECTION_PROMPT = """You are an expert scam detection system. Analyze the following message and determine if it is a scam attempt.
@@ -71,7 +50,7 @@ Analyze for these scam indicators:
 
 Respond ONLY with a valid JSON object in this exact format:
 {{
-    "is_scam": true/false,
+    "scam_detected": true/false,
     "scam_type": "TYPE_FROM_ABOVE or null",
     "confidence": 0.0-1.0,
     "indicators": ["list", "of", "specific", "indicators", "found"],
@@ -83,7 +62,7 @@ Respond ONLY with a valid JSON object in this exact format:
 Important: Respond ONLY with the JSON, no other text."""
 
 
-def scam_detection_agent(state: Dict[str, Any]) -> Dict[str, Any]:
+async def scam_detection_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Analyze the incoming message for scam indicators using GPT-5-mini.
     Integrates fact-checker results if available.
@@ -123,16 +102,22 @@ Claims Checked: {fact_check_results.get('claims_checked', 0)}
     )
     
     try:
-        response_text = call_llm(
+        from utils.llm_client import call_llm_async
+        
+        response_text = await call_llm_async(
             prompt=prompt,
             system_instruction="You are an expert scam detection AI.",
             json_mode=True,
             agent_name="detection"  # Uses gpt-5-mini
         )
         
-        analysis = _parse_json_safely(response_text)
+        analysis = parse_json_safely(response_text)
         
-        is_scam = analysis.get("is_scam", False)
+        scam_detected = analysis.get("scam_detected", False)
+        # Fallback for old models or hallucinations
+        if not scam_detected and analysis.get("is_scam"):
+            scam_detected = analysis.get("is_scam")
+            
         confidence = float(analysis.get("confidence", 0.0))
         scam_type = analysis.get("scam_type")
         
@@ -142,10 +127,10 @@ Claims Checked: {fact_check_results.get('claims_checked', 0)}
         
         # Transparent Logging
         from utils.logger import AgentLogger
-        AgentLogger.scam_detected(confidence, f"Type: {scam_type}, IsScam: {is_scam}")
+        AgentLogger.scam_detected(confidence, f"Type: {scam_type}, IsScam: {scam_detected}")
         
         # Check against threshold
-        if is_scam and confidence >= settings.scam_detection_threshold:
+        if scam_detected and confidence >= settings.scam_detection_threshold:
             return {
                 "scam_detected": True,
                 "scam_type": scam_type,

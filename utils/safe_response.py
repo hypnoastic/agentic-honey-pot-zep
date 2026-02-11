@@ -26,17 +26,29 @@ def create_fallback_response(error_msg: str = "") -> AnalyzeResponse:
 def construct_safe_response(result: Dict[str, Any], conversation_id: str) -> AnalyzeResponse:
     """
     Construct a valid AnalyzeResponse from the workflow result.
-    Returns only status and reply per Section 8.
+    Optimized to pull from both top-level state and nested final_response.
     """
     try:
-        # Extract reply from agent_response (internal name)
-        agent_reply = result.get("agent_response") or result.get("reply")
+        # 1. Get nested response if available (from response_formatter)
+        final = result.get("final_response", {})
+        
+        # 2. Extract fields (Prioritizing nested 'final' over top-level state)
+        reply = final.get("reply") or final.get("agent_response") or result.get("agent_response") or result.get("reply")
+        scam_detected = final.get("scam_detected")
+        if scam_detected is None:
+            scam_detected = result.get("scam_detected", False)
+            
+        scam_type = final.get("scam_type") or result.get("scam_type")
+        entities = final.get("extracted_entities") or result.get("extracted_entities", {})
+        turns = final.get("engagement_count") or result.get("engagement_count", 0)
         
         return AnalyzeResponse(
             status="success",
-            reply=str(agent_reply) if agent_reply else None,
-            scam_detected=result.get("is_scam", False),
-            engagement_count=result.get("engagement_count", 0)
+            reply=str(reply) if reply else None,
+            scam_detected=bool(scam_detected),
+            scam_type=scam_type,
+            extracted_entities=entities,
+            engagement_count=int(turns)
         )
     except Exception as e:
         logger.error(f"Error constructing safe response: {e}")

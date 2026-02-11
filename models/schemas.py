@@ -89,6 +89,14 @@ class AnalyzeResponse(BaseModel):
         default=False,
         description="Whether a scam was detected"
     )
+    scam_type: Optional[str] = Field(
+        default=None,
+        description="Type of scam detected"
+    )
+    extracted_entities: Optional[Dict[str, List[Any]]] = Field(
+        default_factory=dict,
+        description="Gathered intelligence"
+    )
     engagement_count: Optional[int] = Field(
         default=0,
         description="Number of engagement turns"

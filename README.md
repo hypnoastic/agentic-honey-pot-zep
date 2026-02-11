@@ -164,13 +164,13 @@ This endpoint triggers the full agentic workflow.
 
 ```json
 {
-  "is_scam": true,
+  "scam_detected": true,
   "scam_type": "BANK_IMPERSONATION",
   "confidence_score": 0.98,
   "extracted_entities": {
     "upi_ids": ["fraud@upi"],
     "phishing_urls": ["http://fake-link.com"]
   },
-  "agent_reply": "I am worried, what should I do?"
+  "reply": "I am worried, what should I do?"
 }
 ```

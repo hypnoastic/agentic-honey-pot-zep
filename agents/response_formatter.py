@@ -55,7 +55,7 @@ def response_formatter_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     
     # Build final response
     final_response = {
-        "is_scam": is_scam,
+        "scam_detected": is_scam,
         "scam_type": scam_type,
         "confidence_score": confidence,
         "extracted_entities": {
@@ -67,7 +67,8 @@ def response_formatter_agent(state: Dict[str, Any]) -> Dict[str, Any]:
         "confidence_factors": state.get("confidence_factors", {}),
         "conversation_summary": summary,
         "persona_name": state.get("persona_name"),
-        "engagement_count": state.get("engagement_count", 0)
+        "engagement_count": state.get("engagement_count", 0),
+        "reply": (state.get("final_response") or {}).get("agent_response")  # Safely handle None
     }
 
     # Preserve agent_response for Live Mode

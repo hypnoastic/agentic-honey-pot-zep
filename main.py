@@ -7,7 +7,7 @@ import uuid
 import logging
 from contextlib import asynccontextmanager
 from typing import Dict, Any, List, Optional
-from fastapi import FastAPI, HTTPException, Header, Depends, Request
+from fastapi import FastAPI, HTTPException, Header, Depends, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import get_settings
@@ -35,6 +35,12 @@ async def lifespan(app: FastAPI):
     # Log Memory status
     memory_status = "enabled" if settings.postgres_enabled and settings.database_url else "disabled"
     logger.info(f"Neon PostgreSQL Memory: {memory_status}")
+    
+    # Pre-initialize Database Pool to reuse handshake for first request
+    if settings.postgres_enabled:
+        from memory.postgres_memory import init_db_pool
+        logger.info("Pre-warming database connection pool...")
+        await init_db_pool()
     
     yield
     logger.info("Agentic Honey-Pot API shutting down...")
@@ -134,6 +140,7 @@ async def health_check():
 async def analyze_message(
     request: AnalyzeRequest,
     raw_request: Request,
+    background_tasks: BackgroundTasks,  # Fix type hint
     api_key: str = Depends(verify_api_key)
 ):
     """
@@ -234,10 +241,11 @@ async def analyze_get():
 async def analyze_trailing_slash(
     request: AnalyzeRequest,
     raw_request: Request,
+    background_tasks: BackgroundTasks,
     api_key: str = Depends(verify_api_key)
 ):
     """Handle trailing slash to prevent 307 Redirects."""
-    return await analyze_message(request, raw_request, api_key)
+    return await analyze_message(request, raw_request, background_tasks, api_key)
 
 @app.post("/")
 async def root_post(request: Request):

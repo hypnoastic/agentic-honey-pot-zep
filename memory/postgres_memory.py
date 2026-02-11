@@ -6,6 +6,7 @@ Provides persistent conversational memory and intelligence context using pgvecto
 import json
 import logging
 import uuid
+import asyncio
 import asyncpg
 import numpy as np
 from typing import Dict, Any, List, Optional, Union
@@ -25,8 +26,22 @@ async def _init_connection(conn):
     await register_vector(conn)
 
 async def _get_pool():
-    """Get or create PostgreSQL connection pool."""
+    """Get or create PostgreSQL connection pool. Loop-safe for tests."""
     global _pool
+    current_loop = asyncio.get_running_loop()
+    
+    # If pool exists, check if it's tied to a different loop
+    if _pool is not None:
+        try:
+            # Internal check for asyncpg pool loop
+            if getattr(_pool, "_loop", None) != current_loop:
+                logger.warning("PostgreSQL pool mismatch: loop has changed. Recreating pool.")
+                # Attempt to close old pool if possible, but don't block
+                # Calling close() might fail if the old loop is already closed/dead
+                _pool = None
+        except Exception:
+            _pool = None
+
     if _pool is None and settings.database_url:
         try:
             _pool = await asyncpg.create_pool(
@@ -40,6 +55,10 @@ async def _get_pool():
             logger.error(f"Failed to initialize PostgreSQL pool: {e}")
             _pool = None
     return _pool
+
+async def init_db_pool():
+    """Explicitly initialize the pool (useful for startup)."""
+    await _get_pool()
 
 async def load_conversation_memory(conversation_id: str, conn: Optional[asyncpg.Connection] = None) -> Dict[str, Any]:
     """
@@ -198,29 +217,44 @@ async def _persist_memory_impl(conn: asyncpg.Connection, conversation_id: str, s
             json.dumps(metadata)
         )
 
-        # 2. Insert Messages (Only new ones ideally, but for now we might blindly insert?)
-        # State has `conversation_history`. We should probably track what we've already inserted.
-        # BUT, the workflow accumulates history. 
-        # Optimization: We only insert the *new* turns.
-        # However, identifying new turns blindly is hard.
-        # For this implementation, we will assume the caller calls this logic at the end 
-        # or we just insert the *last* turn if called incrementally?
-        # The workflow calls persist at the very end with `persist_conversation_memory`.
-        # So we can just dump the whole history? No, that duplicates if we run multiple times.
-        # STRATEGY: Delete all messages for session and re-insert? No, expensive.
-        # STRATEGY: Check count? 
-        # BETTER: The workflow passes `state`. We can just look at `conversation_history`.
-        # Given this is a prototype/hackathon project, let's just insert all and ignore duplicates 
-        # IF we had a unique ID per message. We don't.
-        # SO: We will delete existing messages and re-insert. It's safe for < 50 items.
-        
-        # Check if we should really wipe. Yes, for consistency in this specific architecture.
+        # 2. Insert Messages (Optimized with Batch Embeddings)
         await conn.execute("DELETE FROM messages WHERE session_id = $1", conversation_id)
         
+        # Collect all texts to embed
+        history = state.get("conversation_history", [])
         original_msg = state.get("original_message", "")
+        
+        texts_to_embed = []
         if original_msg:
-                # Gen embedding for original message as it's the "start"
-            emb = await _get_embedding_safe(original_msg)
+            texts_to_embed.append(original_msg)
+            
+        # Only embed user/scammer messages for search relevance
+        # But for completeness, we might want all? 
+        # Let's stick to logic: Embed "user" (scammer) messages.
+        # Honeypot messages are less useful for "similar scam" search.
+        # Maps history index to embedding index
+        embed_map = {} 
+        
+        for i, turn in enumerate(history):
+            role = "assistant" if turn.get("role") == "honeypot" else "user"
+            content = turn.get("message", "")
+            if role == "user" and content:
+                embed_map[i] = len(texts_to_embed)
+                texts_to_embed.append(content)
+                
+        # Generate all embeddings in ONE call
+        from utils.llm_client import get_embeddings_batch
+        embeddings = []
+        if texts_to_embed:
+            try:
+                embeddings = await get_embeddings_batch(texts_to_embed)
+            except Exception as e:
+                logger.error(f"Batch embedding failed: {e}")
+                # Fallback: empty list, will result in None embeddings
+        
+        # Insert Original Message
+        if original_msg:
+            emb = embeddings[0] if embeddings else None
             await conn.execute(
                 """
                 INSERT INTO messages (session_id, role, content, embedding)
@@ -228,16 +262,16 @@ async def _persist_memory_impl(conn: asyncpg.Connection, conversation_id: str, s
                 """,
                 conversation_id, original_msg, emb
             )
-
-        history = state.get("conversation_history", [])
-        for turn in history:
+            
+        # Insert History
+        for i, turn in enumerate(history):
             role = "assistant" if turn.get("role") == "honeypot" else "user"
             content = turn.get("message", "")
-            # Only embed scammer messages for similarity search? Or all?
-            # Generally user messages are what we search against (prompts).
-            # Actually we usually search *for* similar scammer messages.
-            emb = await _get_embedding_safe(content) if role == "user" else None
             
+            emb = None
+            if i in embed_map and embeddings and len(embeddings) > embed_map[i]:
+                emb = embeddings[embed_map[i]]
+                
             await conn.execute(
                 """
                 INSERT INTO messages (session_id, role, content, embedding)
@@ -246,7 +280,7 @@ async def _persist_memory_impl(conn: asyncpg.Connection, conversation_id: str, s
                 conversation_id, role, content, emb
             )
         
-        logger.info(f"Persisted {len(history)} messages to Postgres for {conversation_id}")
+        logger.info(f"Persisted {len(history)} messages to Postgres for {conversation_id} (Batch Embeddings)")
 
         # 3. Add Intelligence Event (if final & detected)
         if is_final and state.get("scam_detected"):

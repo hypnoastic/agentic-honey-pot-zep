@@ -14,6 +14,8 @@ EXPORTS:
 """
 
 import logging
+import asyncio
+import uuid
 from typing import Dict, Any, Literal, Optional, Union, List
 from langgraph.graph import StateGraph, END
 
@@ -31,191 +33,225 @@ logger = logging.getLogger(__name__)
 def create_honeypot_workflow() -> StateGraph:
     """
     Create the LangGraph workflow for the honeypot system.
-    
-    HARDENED FLOW:
-    1. Pre-Filter (deterministic) → obvious scam skips LLM detection
-    2. Scam Detection (LLM) → only for ambiguous cases
-    3. Planner → (Engage | End)  [Judge merged into Planner]
-    4. Engage → Persona → Extraction → loop or exit
     """
-    
-    # Create the graph
     workflow = StateGraph(HoneypotState)
     
     # Add nodes
-    # Add nodes
-    workflow.add_node("pre_filter", _pre_filter_node)
-    workflow.add_node("scam_detection", _scam_detection_node)
+    workflow.add_node("parallel_intake", _parallel_intake_node)
     workflow.add_node("planner", _planner_node)
     workflow.add_node("persona_engagement", _persona_engagement_node)
-    workflow.add_node("intelligence_extraction", _intelligence_extraction_node)  # Full LLM
-    workflow.add_node("regex_extractor", _regex_extractor_node)                  # Fast Regex
+    workflow.add_node("intelligence_extraction", _intelligence_extraction_node)
+    workflow.add_node("regex_extractor", _regex_extractor_node)
     workflow.add_node("response_formatter", _response_formatter_node)
     
     # Set entry point
-    workflow.set_entry_point("pre_filter")
+    workflow.set_entry_point("parallel_intake")
     
-    # Conditional Edge: Pre-Filter → Scam Detection OR Planner
+    # Edges
     workflow.add_conditional_edges(
-        "pre_filter",
-        _route_from_prefilter,
+        "parallel_intake",
+        _route_from_intake,
         {
-            "obvious_scam": "planner",
-            "needs_llm": "scam_detection"
+            "planner": "planner",
+            "end": "response_formatter"
         }
     )
     
-    # Edge: Detection → Planner
-    workflow.add_edge("scam_detection", "planner")
-    
-    # Conditional Edge: Planner → Next Step
     workflow.add_conditional_edges(
         "planner",
         _route_from_planner,
         {
             "engage": "persona_engagement",
-            "judge": "intelligence_extraction",  # Judge -> Deep Scan
-            "end": "response_formatter"          # End -> Skip Scan
+            "judge": "intelligence_extraction",
+            "end": "response_formatter"
         }
     )
     
-    # Edge: Persona → Regex Extractor (Fast Loop)
     workflow.add_edge("persona_engagement", "regex_extractor")
-    
-    # Edge: Regex Extractor → Formatter
     workflow.add_edge("regex_extractor", "response_formatter")
-
-    # Edge: Full Extraction → Formatter
     workflow.add_edge("intelligence_extraction", "response_formatter")
-    
-    # Edge: Formatter → End
     workflow.add_edge("response_formatter", END)
     
     return workflow.compile()
 
 
+# ============================================================================
+# HELPER NODES
+# ============================================================================
+
 def _pre_filter_node(state: HoneypotState) -> HoneypotState:
-    """
-    Deterministic pre-filter node.
-    Detects obvious scams without LLM call.
-    """
     from utils.prefilter import prefilter_scam_detection, extract_entities_deterministic
-    
     message = state.get("original_message", "")
-    
-    # Run deterministic scam detection
     is_obvious, scam_type, confidence, indicators = prefilter_scam_detection(message)
-    
-    # Run deterministic entity extraction
     regex_entities = extract_entities_deterministic(message)
     
-    logger.info(f"PRE-FILTER: Obvious={is_obvious}, Type={scam_type}, Conf={confidence:.2f}")
+    logger.info(f"PRE-FILTER: Obvious={is_obvious}, Type={scam_type}")
+    
+    res = {
+        **state,
+        "prefilter_result": {"is_obvious": is_obvious, "scam_type": scam_type, "confidence": confidence, "indicators": indicators},
+        "prefilter_entities": regex_entities
+    }
     
     if is_obvious:
-        # FAST PATH: Skip LLM detection entirely
-        return {
-            **state,
-            "prefilter_result": {
-                "is_obvious": True,
-                "scam_type": scam_type,
-                "confidence": confidence,
-                "indicators": indicators
-            },
+        res.update({
             "scam_detected": True,
             "scam_type": scam_type,
             "scam_indicators": indicators,
-            "confidence_score": confidence,
-            "prefilter_entities": regex_entities,
-            "current_agent": "planner"
-        }
-    else:
-        # SLOW PATH: Needs LLM analysis
-        return {
-            **state,
-            "prefilter_result": {
-                "is_obvious": False,
-                "scam_type": scam_type,
-                "confidence": confidence,
-                "indicators": indicators
-            },
-            "prefilter_entities": regex_entities,
-            "current_agent": "scam_detection"
-        }
+            "confidence_score": confidence
+        })
+    return res
 
+async def _scam_detection_node(state: HoneypotState) -> Dict[str, Any]:
+    return await scam_detection_agent(dict(state))
 
-def _scam_detection_node(state: HoneypotState) -> HoneypotState:
-    result = scam_detection_agent(dict(state))
-    return {**state, **result}
+def _planner_node(state: HoneypotState) -> Dict[str, Any]:
+    return planner_agent(dict(state))
 
+def _persona_engagement_node(state: HoneypotState) -> Dict[str, Any]:
+    return persona_engagement_agent(dict(state))
 
-def _planner_node(state: HoneypotState) -> HoneypotState:
-    result = planner_agent(dict(state))
-    return {**state, **result}
+async def _intelligence_extraction_node(state: HoneypotState) -> Dict[str, Any]:
+    return await intelligence_extraction_agent(dict(state))
 
-
-def _persona_engagement_node(state: HoneypotState) -> HoneypotState:
-    state["strategy_hint"] = state.get("strategy_hint", "")
-    result = persona_engagement_agent(dict(state))
-    return {**state, **result}
-
-
-def _intelligence_extraction_node(state: HoneypotState) -> HoneypotState:
-    result = intelligence_extraction_agent(dict(state))
-    return {**state, **result}
-
-
-def _regex_extractor_node(state: HoneypotState) -> HoneypotState:
-    """Node for fast regex-only extraction."""
+def _regex_extractor_node(state: HoneypotState) -> Dict[str, Any]:
     from agents.intelligence_extraction import regex_only_extraction_agent
-    result = regex_only_extraction_agent(dict(state))
-    return {**state, **result}
+    return regex_only_extraction_agent(dict(state))
 
+def _response_formatter_node(state: HoneypotState) -> Dict[str, Any]:
+    return response_formatter_agent(dict(state))
 
-def _response_formatter_node(state: HoneypotState) -> HoneypotState:
-    result = response_formatter_agent(dict(state))
-    return {**state, **result}
+# ============================================================================
+# ORCHESTRATION HELPER NODES
+# ============================================================================
 
+async def _parallel_intake_node(state: HoneypotState) -> Dict[str, Any]:
+    """Parallel Assessment and Extraction."""
+    async def run_assessment():
+        # Pre-filter is sync but we call it here
+        from utils.prefilter import prefilter_scam_detection, extract_entities_deterministic
+        message = state.get("original_message", "")
+        is_obvious, scam_type, confidence, indicators = prefilter_scam_detection(message)
+        regex_entities = extract_entities_deterministic(message)
+        
+        pre_res = {
+            "prefilter_result": {"is_obvious": is_obvious, "scam_type": scam_type, "confidence": confidence, "indicators": indicators},
+            "prefilter_entities": regex_entities
+        }
+        
+        if is_obvious:
+            pre_res.update({
+                "scam_detected": True,
+                "scam_type": scam_type,
+                "scam_indicators": indicators,
+                "confidence_score": confidence
+            })
+            return pre_res
+        
+        # If not obvious, run LLM detection
+        # Create a temp state for the agent
+        temp_state = {**state, **pre_res}
+        detect_res = await scam_detection_agent(temp_state)
+        return {**pre_res, **detect_res}
 
-def _route_from_prefilter(state: HoneypotState) -> Literal["obvious_scam", "needs_llm"]:
-    """Route based on pre-filter result."""
-    prefilter = state.get("prefilter_result", {})
+    async def run_extraction():
+        return await intelligence_extraction_agent(dict(state))
+
+    assessment_res, extraction_res = await asyncio.gather(run_assessment(), run_extraction())
     
-    if prefilter.get("is_obvious", False):
-        logger.info("PRE-FILTER ROUTE: Obvious scam detected, skipping LLM")
-        return "obvious_scam"
-    else:
-        logger.info("PRE-FILTER ROUTE: Ambiguous, forwarding to LLM detection")
-        return "needs_llm"
+    # Merged deltas
+    merged_delta = {**assessment_res, **extraction_res}
+    
+    # Authoritative Force for entities
+    entities = merged_delta.get("extracted_entities", {})
+    high_value = len(entities.get("bank_accounts", [])) + len(entities.get("upi_ids", [])) + len(entities.get("phishing_urls", []))
+    
+    if high_value > 0:
+        merged_delta["scam_detected"] = True
+        if not merged_delta.get("scam_type"): 
+            merged_delta["scam_type"] = "SUSPICIOUS_ENTITY"
+        
+    return merged_delta
 
+def _route_from_intake(state: HoneypotState) -> Literal["planner", "end"]:
+    return "planner" if state.get("scam_detected") else "end"
 
 def _route_from_planner(state: HoneypotState) -> Literal["engage", "judge", "end"]:
-    """Route based on Planner's decision."""
     action = state.get("planner_action", "end")
-    
-    # Safety Check: If max turns reached, force judge (not end, to capture info)
-    count = state.get("engagement_count", 0)
-    from config import get_settings
-    settings = get_settings()
-    max_turns = state.get("max_engagements", settings.max_engagement_turns)
-    
-    if count >= max_turns and action == "engage":
-        logger.info(f"PLANNER ROUTE: Max turns ({max_turns}) reached, forcing Judge")
-        return "judge"
-    
-    if action == "engage":
-        return "engage"
-    elif action == "judge":
-        return "judge"
-    else:
+    if action == "judge" and state.get("extraction_complete"):
         return "end"
-
+    return action if action in ["engage", "judge", "end"] else "end"
 
 # ============================================================================
-# ASYNC WORKFLOW RUNNER
+# SHARED WORKFLOW LOGIC
 # ============================================================================
 
-import asyncio
-import uuid
+async def _load_system_memory(conversation_id: str, message: str, txn_conn: Any) -> Dict[str, Any]:
+    """Helper to load all memory and fact-check data in parallel."""
+    try:
+        from memory.postgres_memory import (
+            load_conversation_memory, search_similar_scams, 
+            search_winning_strategies, search_past_failures, 
+            get_scam_stats, get_optimal_traits, get_temporal_pacing
+        )
+        from agents.fact_checker import fact_check_message
+        
+        # Sequential calls to avoid asyncpg InterfaceError with shared txn
+        session_mem = await load_conversation_memory(conversation_id, conn=txn_conn)
+        similar = await search_similar_scams(message, limit=3)
+        winning = await search_winning_strategies("scam", limit=3)
+        failures = await search_past_failures("scam", limit=3)
+        stats = await get_scam_stats("scam")
+        fact_check = await fact_check_message(message)
+        
+        ctx = session_mem if isinstance(session_mem, dict) else {}
+        ctx["fact_check_results"] = fact_check
+        
+        if similar:
+            scores = [s.get("score", 0.0) for s in similar]
+            ctx["prior_scam_types"] = [s.get("content", "") for s in similar]
+            ctx["familiarity_score"] = max(scores) if scores else 0.0
+            
+        ctx.update({"winning_strategies": winning, "past_failures": failures, "scam_stats": stats})
+        
+        batch2 = await asyncio.gather(
+            get_optimal_traits("scam"), get_temporal_pacing("scam"),
+            return_exceptions=True
+        )
+        
+        ctx["persona_traits"] = batch2[0] if not isinstance(batch2[0], Exception) else None
+        ctx["temporal_stats"] = batch2[1] if not isinstance(batch2[1], Exception) else {"avg_turns": 4.0}
+        
+        return ctx
+    except Exception as e:
+        logger.warning(f"Memory orchestration failed: {e}")
+        return {"fact_check_results": {"fact_checked": False}}
+
+async def _trigger_guvi_callback_safe(state: Dict[str, Any], conversation_id: str):
+    try:
+        if state.get("scam_detected") and (state.get("engagement_complete") or state.get("extraction_complete")):
+            from utils.guvi_callback import send_guvi_callback, build_agent_notes
+            
+            notes = build_agent_notes(
+                scam_type=state.get("scam_type"),
+                behavioral_signals=state.get("behavioral_signals", []),
+                conversation_summary=state.get("conversation_summary", "")
+            )
+            
+            await send_guvi_callback(
+                session_id=conversation_id,
+                scam_detected=True,
+                total_messages=len(state.get("conversation_history", [])) + state.get("engagement_count", 0) + 1,
+                extracted_intelligence=state.get("extracted_entities", {}),
+                agent_notes=notes,
+                scam_indicators=state.get("scam_indicators", []) + state.get("behavioral_signals", [])
+            )
+    except Exception as e:
+        logger.warning(f"GUVI callback orchestration failed: {e}")
+
+# ============================================================================
+# MAIN WORKFLOW RUNNER
+# ============================================================================
 
 async def run_honeypot_workflow(
     message: str,
@@ -224,146 +260,24 @@ async def run_honeypot_workflow(
     conversation_history: Optional[List[Dict]] = None,
     metadata: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
-    """
-    Run the complete honeypot workflow asynchronously.
     
-    Args:
-        message: The message to analyze
-        conversation_id: Unique conversation ID
-        max_engagements: Maximum engagement turns
-        conversation_history: Prior conversation history
-        metadata: Optional metadata from API request
-    """
-    
-    if not conversation_id:
-        conversation_id = str(uuid.uuid4())
-    
+    if not conversation_id: conversation_id = str(uuid.uuid4())
     logger.info(f"[{conversation_id[:8]}] Starting honeypot workflow")
     
-    # Initialize memory context
-    memory_context = {}
-    
-    # Try to load context from Postgres
-    # Acquire session lock to serialize requests for same ID
     async with capture_session_lock(conversation_id) as txn_conn:
+        # 1. Load context
+        memory_context = await _load_system_memory(conversation_id, message, txn_conn)
         
-        # Try to load context from Postgres
-        try:
-            from memory.postgres_memory import (
-                load_conversation_memory,
-                get_scam_signal,
-                search_similar_scams,
-                search_winning_strategies,
-                search_past_failures,
-                get_scam_stats,
-                get_optimal_traits,
-                get_temporal_pacing
-            )
-            
-            if True:
-                # BATCH 1: Independent queries + Fact-Check (all in parallel)
-                from agents.fact_checker import fact_check_message
-                
-                # We need to pass txn_conn to load_conversation_memory
-                batch1_results = await asyncio.gather(
-                    load_conversation_memory(conversation_id, conn=txn_conn),
-                    # Note: get_scam_signal functionality is merged into search_similar_scams or handled via Postgres
-                    # but we keep the structure for now if it exists in postgres_memory
-                    search_similar_scams(message, limit=3),
-                    search_winning_strategies("scam", limit=3),
-                    search_past_failures("scam", limit=3),
-                    get_scam_stats("scam"),
-                    fact_check_message(message),
-                    return_exceptions=True
-                )
-                
-                # Unpack results
-                session_memory, similar_scams, winning_strategies, past_failures, scam_stats, fact_check_results = batch1_results
-                
-                # Handle exceptions gracefully
-                if isinstance(session_memory, Exception):
-                    session_memory = {}
-                if isinstance(similar_scams, Exception):
-                    similar_scams = []
-                if isinstance(winning_strategies, Exception):
-                    winning_strategies = []
-                if isinstance(past_failures, Exception):
-                    past_failures = []
-                if isinstance(scam_stats, Exception):
-                    scam_stats = {"success_rate": 0.5, "total_attempts": 0}
-                if isinstance(fact_check_results, Exception):
-                    fact_check_results = {"fact_checked": False, "reason": "Fact-check failed"}
-                
-                # Build memory context
-                memory_context = session_memory if isinstance(session_memory, dict) else {}
-                memory_context["fact_check_results"] = fact_check_results
-                
-                if similar_scams:
-                    descriptions = [s.get("content", "") for s in similar_scams]
-                    scores = [s.get("score", 0.0) for s in similar_scams]
-                    max_similarity = max(scores) if scores else 0.0
-                    memory_context["prior_scam_types"] = descriptions
-                    memory_context["familiarity_score"] = max_similarity
-                
-                if winning_strategies:
-                    memory_context["winning_strategies"] = winning_strategies
-                
-                if past_failures:
-                    memory_context["past_failures"] = past_failures
-                
-                memory_context["scam_stats"] = scam_stats
-                
-                if fact_check_results.get("fact_checked"):
-                    logger.info(f"FACT-CHECK: {fact_check_results.get('overall_status', 'UNKNOWN')}")
-                
-                # BATCH 2: Dependent queries
-                # Use most similar scam type for optimization if available
-                detected_type = "scam"
-                if similar_scams and isinstance(similar_scams, list) and len(similar_scams) > 0:
-                     # Extract type from metadata or content if possible
-                     pass
-                
-                batch2_results = await asyncio.gather(
-                    get_optimal_traits(detected_type),
-                    get_temporal_pacing(detected_type),
-                    return_exceptions=True
-                )
-                
-                optimal_traits, temporal_stats = batch2_results
-                
-                if isinstance(optimal_traits, Exception):
-                    optimal_traits = None
-                if isinstance(temporal_stats, Exception):
-                    temporal_stats = {"avg_turns": 4.0, "sample_size": 0}
-                
-                if not memory_context.get("persona_traits"):
-                    if optimal_traits:
-                        memory_context["persona_traits"] = optimal_traits
-                    else:
-                        memory_context["persona_traits"] = {
-                            "age": "60+",
-                            "tech_literacy": "low",
-                            "emotional_state": "confused",
-                            "authority_response": "compliant"
-                        }
-                
-                memory_context["temporal_stats"] = temporal_stats
-
-        except Exception as e:
-            logger.warning(f"Could not load memory: {e}")
-        
-        # Convert conversation history
-        initial_conversation_history = []
+        # 2. Build initial state
+        initial_history = []
         if conversation_history:
             for i, msg in enumerate(conversation_history):
-                role = "scammer" if msg.get("sender") == "scammer" else "honeypot"
-                initial_conversation_history.append({
-                    "role": role,
+                initial_history.append({
+                    "role": "scammer" if msg.get("sender") == "scammer" else "honeypot",
                     "message": msg.get("text", ""),
                     "turn_number": i + 1
                 })
         
-        # Create initial state
         initial_state = create_initial_state(
             message=message,
             max_engagements=max_engagements,
@@ -371,114 +285,42 @@ async def run_honeypot_workflow(
             memory_context=memory_context
         )
         
-        if not initial_conversation_history and memory_context.get("prior_messages"):
-            for i, msg in enumerate(memory_context["prior_messages"]):
-                role = "honeypot" if msg.get("role") == "assistant" else "scammer"
-                initial_conversation_history.append({
-                    "role": role,
-                    "message": msg.get("content", ""),
-                    "turn_number": i + 1
-                })
-
-        if initial_conversation_history:
-            initial_state["conversation_history"] = initial_conversation_history
-            # Use persisted count if available, otherwise calculate
-            persisted_count = memory_context.get("engagement_count", 0)
-            calculated_count = len([m for m in initial_conversation_history if m["role"] == "honeypot"])
-            initial_state["engagement_count"] = max(persisted_count, calculated_count)
-            
-            # Restore completion flags
-            initial_state["engagement_complete"] = memory_context.get("engagement_complete", False)
-            initial_state["extraction_complete"] = memory_context.get("extraction_complete", False)
+        if initial_history:
+            initial_state["conversation_history"] = initial_history
+            initial_state["engagement_count"] = len([m for m in initial_history if m["role"] == "honeypot"])
             initial_state["scam_detected"] = memory_context.get("scam_detected", False)
-        
-        # Create and run workflow
+
+        # 3. Execute Workflow
         workflow = create_honeypot_workflow()
+        final_state = await workflow.ainvoke(initial_state)
         
-        final_state = await asyncio.to_thread(workflow.invoke, initial_state)
-        
-        # Persist results to Postgres
+        # 4. Failure Event Logging
         try:
-            from memory.postgres_memory import persist_conversation_memory
-            
-            if True:
-                await persist_conversation_memory(
-                    conversation_id=conversation_id,
-                    state=dict(final_state),
-                    is_final=True,
-                    conn=txn_conn
-                )
-        except Exception as e:
-            logger.warning(f"Could not persist memory: {e}")
-        
-        # Failure Analysis
-        try:
-            final_response = final_state.get("final_response", {})
-            entity_count = len(final_response.get("extracted_entities", {}).get("bank_accounts", [])) + \
-                           len(final_response.get("extracted_entities", {}).get("upi_ids", []))
-            
-            turns_used = final_state.get("engagement_count", 0)
-            
-            if turns_used >= 3 and entity_count == 0:
+            entity_count = len(final_state.get("extracted_entities", {}).get("bank_accounts", []))
+            if final_state.get("engagement_count", 0) >= 3 and entity_count == 0:
                 from memory.postgres_memory import add_failure_event
                 await add_failure_event(conversation_id, dict(final_state))
-                
-        except Exception as e:
-            logger.warning(f"Could not persist failure event: {e}")
+        except: pass
         
-        # GUVI Callback
-        try:
-            scam_detected = final_state.get("scam_detected", False)
-            engagement_complete = final_state.get("engagement_complete", False)
-            extraction_complete = final_state.get("extraction_complete", False)
-            
-            error_present = final_state.get("error") is not None
-            
-            if scam_detected and (engagement_complete or extraction_complete) and not error_present:
-                from utils.guvi_callback import send_guvi_callback, build_agent_notes
-                
-                entities = final_state.get("extracted_entities", {})
-                behavioral_signals = final_state.get("behavioral_signals", [])
-                scam_indicators = final_state.get("scam_indicators", [])
-                
-                history_count = len(conversation_history or [])
-                engagement_count = final_state.get("engagement_count", 0)
-                total_messages = history_count + 1 + engagement_count
-                
-                agent_notes = build_agent_notes(
-                    scam_type=final_state.get("scam_type"),
-                    behavioral_signals=behavioral_signals,
-                    conversation_summary=final_state.get("conversation_summary", "")
-                )
-                
-                await send_guvi_callback(
-                    session_id=conversation_id,
-                    scam_detected=True,
-                    total_messages=total_messages,
-                    extracted_intelligence=entities,
-                    agent_notes=agent_notes,
-                    scam_indicators=scam_indicators + behavioral_signals
-                )
-                    
-        except Exception as e:
-            logger.warning(f"GUVI callback failed: {e}")
+        # 5. Callback
+        await _trigger_guvi_callback_safe(final_state, conversation_id)
         
-        return final_state.get("final_response", {
-            "is_scam": False,
-            "scam_type": None,
-            "confidence_score": 0.0,
-            "extracted_entities": {
-                "bank_accounts": [],
-                "upi_ids": [],
-                "phishing_urls": []
-            },
-            "conversation_summary": "Analysis failed to complete."
-        })
+        # 6. Database Persistence (Neon)
+        # We do this INSIDE the same transaction context to ensure consistency
+        from memory.postgres_memory import persist_conversation_memory
+        await persist_conversation_memory(
+            conversation_id=conversation_id,
+            state=final_state,
+            is_final=final_state.get("engagement_complete", False) or final_state.get("extraction_complete", False),
+            conn=txn_conn
+        )
+        
+        # 6. Final Return
+        if "final_response" in final_state:
+            return final_state["final_response"]
+            
+        from utils.safe_response import construct_safe_response
+        return construct_safe_response(final_state, conversation_id)
 
-
-# ============================================================================
-# BACKWARD COMPATIBILITY ALIAS
-# ============================================================================
-
-# Alias for main.py compatibility
+# Backward Compatibility
 run_honeypot_analysis = run_honeypot_workflow

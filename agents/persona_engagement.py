@@ -113,7 +113,7 @@ def persona_engagement_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     if engagement_count >= max_engagements:
         return {
             "engagement_complete": True,
-            "current_agent": "intelligence_extraction"
+            "current_agent": "regex_extractor"
         }
     
     try:
@@ -140,7 +140,7 @@ def persona_engagement_agent(state: Dict[str, Any]) -> Dict[str, Any]:
             "conversation_history": new_history,
             "engagement_count": engagement_count + 1,
             "engagement_complete": False,               # Engagement continues in next turn
-            "current_agent": "intelligence_extraction",
+            "current_agent": "regex_extractor",
             "final_response": {"agent_response": honeypot_message}
         }
         
@@ -148,7 +148,7 @@ def persona_engagement_agent(state: Dict[str, Any]) -> Dict[str, Any]:
         logger.error(f"Persona engagement error: {e}")
         return {
             "engagement_complete": True,
-            "current_agent": "intelligence_extraction",
+            "current_agent": "regex_extractor",
             "error": str(e)
         }
 

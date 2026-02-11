@@ -7,7 +7,7 @@ import logging
 import time
 from typing import Optional, List, Dict, Union
 import openai
-from openai import OpenAI, APIError, RateLimitError, APITimeoutError
+from openai import OpenAI, AsyncOpenAI, APIError, RateLimitError, APITimeoutError
 from config import get_settings, get_model_for_agent
 
 logger = logging.getLogger(__name__)
@@ -32,6 +32,7 @@ class LLMClient:
             logger.warning("OPENAI_API_KEY not found in settings!")
             
         self.client = OpenAI(api_key=self.api_key, timeout=settings.openai_timeout)
+        self.async_client = AsyncOpenAI(api_key=self.api_key, timeout=settings.openai_timeout)
         self.default_model = settings.openai_model
         self._initialized = True
         logger.info(f"LLMClient initialized with default model: {self.default_model}")
@@ -95,6 +96,57 @@ class LLMClient:
         logger.error(f"Failed to generate response after {retries} attempts. Last error: {last_error}")
         raise last_error or Exception("Unknown error in LLM generation")
 
+    async def generate_response_async(
+        self, 
+        prompt: str, 
+        system_instruction: Optional[str] = None, 
+        json_mode: bool = False,
+        model: Optional[str] = None,
+        agent_name: Optional[str] = None,
+        temperature: float = 0.0
+    ) -> str:
+        """
+        Generate a response from OpenAI ASYNC with retry logic.
+        """
+        # Determine model to use
+        if model:
+            use_model = model
+        elif agent_name:
+            use_model = get_model_for_agent(agent_name)
+        else:
+            use_model = self.default_model
+            
+        messages = []
+        if system_instruction:
+            messages.append({"role": "system", "content": system_instruction})
+        messages.append({"role": "user", "content": prompt})
+
+        settings = get_settings()
+        retries = settings.api_retry_attempts
+        last_error = None
+
+        for attempt in range(retries):
+            try:
+                response = await self.async_client.chat.completions.create(
+                    model=use_model,
+                    messages=messages,
+                    temperature=temperature,
+                    response_format={"type": "json_object"} if json_mode else None
+                )
+                return response.choices[0].message.content
+                
+            except (RateLimitError, APITimeoutError, APIError) as e:
+                last_error = e
+                wait_time = 2 ** attempt
+                logger.warning(f"Async OpenAI API Error (Attempt {attempt+1}/{retries}): {e}. Retrying in {wait_time}s...")
+                await asyncio.sleep(wait_time)
+            except Exception as e:
+                logger.error(f"Unexpected Async OpenAI Error: {e}")
+                raise e
+        
+        logger.error(f"Failed to generate async response after {retries} attempts. Last error: {last_error}")
+        raise last_error or Exception("Unknown error in LLM generation")
+
     async def get_embedding(self, text: str) -> List[float]:
         """Generate embedding for text using OpenAI."""
         if not text:
@@ -109,6 +161,31 @@ class LLMClient:
             return response.data[0].embedding
         except Exception as e:
             logger.error(f"Error generating embedding: {e}")
+            raise e
+
+    async def get_embeddings_batch(self, texts: List[str]) -> List[List[float]]:
+        """
+        Generate embeddings for a batch of texts using OpenAI.
+        Significantly faster than sequential calls.
+        """
+        if not texts:
+            return []
+            
+        try:
+            # Replace newlines
+            clean_texts = [t.replace("\n", " ") for t in texts]
+            
+            response = self.client.embeddings.create(
+                input=clean_texts,
+                model="text-embedding-3-small"
+            )
+            
+            # OpenAI guarantees order matches input
+            return [data.embedding for data in response.data]
+            
+        except Exception as e:
+            logger.error(f"Error generating batch embeddings: {e}")
+            # Fallback to sequential if batch fails? No, raise error.
             raise e
 
 
@@ -155,6 +232,24 @@ def call_llm(
     )
 
 
+async def call_llm_async(
+    prompt: str, 
+    system_instruction: Optional[str] = None, 
+    json_mode: bool = False,
+    agent_name: Optional[str] = None,
+    temperature: float = 0.0
+) -> str:
+    """Helper function for async LLM calls."""
+    client = get_llm_client()
+    return await client.generate_response_async(
+        prompt=prompt, 
+        system_instruction=system_instruction, 
+        json_mode=json_mode,
+        agent_name=agent_name,
+        temperature=temperature
+    )
+
+
 async def get_embedding(text: str) -> List[float]:
     """Helper to get embeddings."""
     client = get_llm_client()
@@ -162,3 +257,11 @@ async def get_embedding(text: str) -> List[float]:
     if not hasattr(client, 'client'): 
         client = LLMClient()
     return await client.get_embedding(text)
+
+
+async def get_embeddings_batch(texts: List[str]) -> List[List[float]]:
+    """Helper to get batch embeddings."""
+    client = get_llm_client()
+    if not hasattr(client, 'client'):
+        client = LLMClient()
+    return await client.get_embeddings_batch(texts)

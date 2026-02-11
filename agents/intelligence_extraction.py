@@ -10,27 +10,12 @@ import logging
 from typing import Dict, Any, List
 from utils.llm_client import call_llm
 from config import get_settings
+from utils.parsing import parse_json_safely
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
 
-def _parse_json_safely(response_text: str) -> Dict[str, Any]:
-    """Safely parse JSON response with fallback handling."""
-    if response_text.startswith("```"):
-        parts = response_text.split("```")
-        if len(parts) >= 2:
-            response_text = parts[1]
-            if response_text.startswith("json"):
-                response_text = response_text[4:]
-    
-    response_text = response_text.strip()
-    
-    try:
-        return json.loads(response_text)
-    except json.JSONDecodeError as e:
-        logger.warning(f"JSON parse error: {e}")
-        return {}
 
 
 # LLM VERIFICATION PROMPT - Instructs LLM to VERIFY, not invent
@@ -77,7 +62,7 @@ Respond with JSON ONLY:
 }}"""
 
 
-def intelligence_extraction_agent(state: Dict[str, Any]) -> Dict[str, Any]:
+async def intelligence_extraction_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Extract intelligence entities using HARDENED pipeline:
     1. Regex extraction (deterministic, high confidence)
@@ -111,7 +96,8 @@ def intelligence_extraction_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     # Also use prefilter entities if available (from pre-filter node)
     prefilter_entities = state.get("prefilter_entities", {})
     if prefilter_entities:
-        regex_entities = _merge_entity_dicts(regex_entities, prefilter_entities)
+        from utils.prefilter import merge_entities
+        regex_entities = merge_entities(regex_entities, prefilter_entities)
     
     # =========================================================================
     # STEP 2: LLM VERIFICATION (Only if needed)
@@ -130,14 +116,16 @@ def intelligence_extraction_agent(state: Dict[str, Any]) -> Dict[str, Any]:
                 regex_entities=regex_summary
             )
             
-            response_text = call_llm(
+            from utils.llm_client import call_llm_async
+            
+            response_text = await call_llm_async(
                 prompt=prompt,
                 system_instruction="You are an entity verification system. VERIFY entities, do NOT invent them.",
                 json_mode=True,
                 agent_name="extraction"
             )
             
-            llm_result = _parse_json_safely(response_text)
+            llm_result = parse_json_safely(response_text)
             llm_entities = llm_result.get("verified_entities", {})
             obfuscation = llm_result.get("obfuscation_detected", "")
             
@@ -170,44 +158,11 @@ def intelligence_extraction_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     
     return {
         "extracted_entities": final_entities,
-        "extraction_complete": False,
+        "extraction_complete": True,
         "current_agent": "planner"  # Loop back to planner (Judge merged)
     }
 
 
-def _merge_entity_dicts(dict1: Dict, dict2: Dict) -> Dict:
-    """Merge two entity dictionaries."""
-    merged = {}
-    all_keys = set(dict1.keys()) | set(dict2.keys())
-    
-    for key in all_keys:
-        list1 = dict1.get(key, [])
-        list2 = dict2.get(key, [])
-        
-        # Get existing values
-        values = set()
-        merged_list = []
-        
-        for item in list1 + list2:
-            if isinstance(item, dict):
-                val = item.get("value", "")
-            else:
-                val = item
-            
-            if val and val not in values:
-                values.add(val)
-                if isinstance(item, dict):
-                    merged_list.append(item)
-                else:
-                    merged_list.append({
-                        "value": item,
-                        "confidence": 1.0,
-                        "source": "explicit"
-                    })
-        
-        merged[key] = merged_list
-    
-    return merged
 
 
 def _format_entities_for_prompt(entities: Dict) -> str:
@@ -231,12 +186,16 @@ def _flatten_entities(entities: Dict) -> Dict:
     """Flatten entity dicts to simple lists for logging."""
     flattened = {}
     for key, items in entities.items():
+        if not items:
+            flattened[key] = []
+            continue
         values = []
         for item in items:
             if isinstance(item, dict):
                 values.append(item.get("value", str(item)))
             else:
                 values.append(str(item))
+        flattened[key] = values
     return flattened
 
 def regex_only_extraction_agent(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -271,6 +230,6 @@ def regex_only_extraction_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     
     return {
         "extracted_entities": final_entities,
-        "extraction_complete": False,
+        "extraction_complete": True,
         "current_agent": "planner"
     }
