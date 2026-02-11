@@ -42,23 +42,15 @@ YOUR TASK:
    - 0.6-0.7 = Inferred/uncertain
    - <0.6 = Too uncertain, DISCARD
 
-Entity types to extract:
-- upi_ids: xxx@upi, xxx@paytm, xxx@gpay, xxx@ybl, etc.
-- bank_accounts: 9-18 digit numbers
-- ifsc_codes: XXXX0XXXXXX format
-- phone_numbers: Indian mobile (+91, 6/7/8/9xxxxxxxxx)
-- phishing_urls: Suspicious URLs
+Entity types: upi_ids, bank_accounts, ifsc_codes, phone_numbers, phishing_urls.
 
 Respond with JSON ONLY:
 {{
     "verified_entities": {{
         "upi_ids": [{{"value": "...", "confidence": 0.0-1.0, "source": "explicit|inferred"}}],
-        "bank_accounts": [{{"value": "...", "confidence": 0.0-1.0, "source": "explicit|inferred"}}],
-        "phone_numbers": [{{"value": "...", "confidence": 0.0-1.0, "source": "explicit|inferred"}}],
-        "phishing_urls": [{{"value": "...", "confidence": 0.0-1.0, "source": "explicit|inferred"}}],
-        "ifsc_codes": [{{"value": "...", "confidence": 0.0-1.0, "source": "explicit|inferred"}}]
+        "bank_accounts": [], "phone_numbers": [], "phishing_urls": [], "ifsc_codes": []
     }},
-    "obfuscation_detected": "Description of any obfuscation patterns found"
+    "obfuscation_detected": "pattern info"
 }}"""
 
 
@@ -124,7 +116,6 @@ async def intelligence_extraction_agent(state: Dict[str, Any]) -> Dict[str, Any]
                 json_mode=True,
                 agent_name="extraction"
             )
-            
             llm_result = parse_json_safely(response_text)
             llm_entities = llm_result.get("verified_entities", {})
             obfuscation = llm_result.get("obfuscation_detected", "")

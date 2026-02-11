@@ -5,11 +5,14 @@ Includes per-agent model selection for cost/quality optimization.
 """
 
 import os
+import logging
 from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -20,21 +23,44 @@ class Settings(BaseSettings):
         extra="ignore"
     )
     
-    # OpenAI
+    # LLM Providers
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
-    openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
     openai_timeout: int = int(os.getenv("OPENAI_TIMEOUT_SECONDS", "30"))
     api_retry_attempts: int = int(os.getenv("API_RETRY_ATTEMPTS", "3"))
     
-    # Per-Agent Model Selection (GPT-5 family fallback)
-    # Per-Agent Model Selection (GPT-5 family)
-    model_planner: str = os.getenv("OPENAI_MODEL_PLANNER", "gpt-4o-mini")
-    model_detection: str = os.getenv("OPENAI_MODEL_DETECTION", "gpt-4o-mini")
-    model_persona: str = os.getenv("OPENAI_MODEL_PERSONA", "gpt-4o-mini")
-    model_response: str = os.getenv("OPENAI_MODEL_RESPONSE", "gpt-4o-mini")
-    model_extraction: str = os.getenv("OPENAI_MODEL_EXTRACTION", "gpt-4o-mini")
-    model_judge: str = os.getenv("OPENAI_MODEL_JUDGE", "gpt-4o-mini")
+    # Per-Agent Model Selection
+    planner_model: str = os.getenv("PLANNER_MODEL", "gemini-2.0-flash")
+    detection_model: str = os.getenv("DETECTION_MODEL", "gemini-2.0-flash")
+    persona_model: str = os.getenv("PERSONA_MODEL", "gemini-2.0-flash")
+    response_model: str = os.getenv("RESPONSE_MODEL", "gemini-2.0-flash")
+    extraction_model: str = os.getenv("EXTRACTION_MODEL", "gemini-2.0-flash")
+    judge_model: str = os.getenv("JUDGE_MODEL", "gemini-2.0-flash")
+    factcheck_model: str = os.getenv("FACTCHECK_MODEL", "gemini-2.0-flash")
     
+    # Embeddings (Strictly GPT)
+    embedding_model: str = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+    
+    # Logging System Status
+    def validate_setup(self):
+        """Validate critical settings and warn if GPT is used for agents."""
+        agent_models = [
+            self.planner_model, self.detection_model, self.persona_model,
+            self.response_model, self.extraction_model, self.judge_model
+        ]
+        active_gpt = [m for m in agent_models if "gpt" in m.lower()]
+        if active_gpt:
+            logger.warning(f"⚠️ CAUTION: GPT based models detected for agents: {active_gpt}. Migration intended for Gemini Flash.")
+        else:
+            logger.info("✅ Migration Status: All agent models appear to be non-GPT (Gemini optimized).")
+            
+        if not self.gemini_api_key:
+            logger.error("❌ CRITICAL: GEMINI_API_KEY is missing!")
+        if not self.openai_api_key:
+            logger.warning("⚠️ OPENAI_API_KEY is missing (required for embeddings).")
+
+        return True
+
     # Serper API for Internet Verification
     serper_api_key: str = os.getenv("SERPER_API_KEY", "")
     
@@ -74,18 +100,20 @@ def get_model_for_agent(agent_name: str) -> str:
     Enables per-agent model optimization for cost/quality balance.
     
     Args:
-        agent_name: One of 'planner', 'detection', 'persona', 'response', 'extraction', 'judge'
+        agent_name: One of 'planner', 'detection', 'persona', 'response', 'extraction', 'judge', 'factcheck'
         
     Returns:
         Model name to use for this agent
     """
     settings = get_settings()
     model_map = {
-        "planner": settings.model_planner,
-        "detection": settings.model_detection,
-        "persona": settings.model_persona,
-        "response": settings.model_response,
-        "extraction": settings.model_extraction,
-        "judge": settings.model_judge,
+        "planner": settings.planner_model,
+        "detection": settings.detection_model,
+        "persona": settings.persona_model,
+        "response": settings.response_model,
+        "extraction": settings.extraction_model,
+        "judge": settings.judge_model,
+        "factcheck": settings.factcheck_model,
     }
-    return model_map.get(agent_name, settings.openai_model)
+    # Default to planner model if not found
+    return model_map.get(agent_name, settings.planner_model)

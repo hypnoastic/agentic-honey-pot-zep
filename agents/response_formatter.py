@@ -1,6 +1,6 @@
 """
 Response Formatter Agent
-Formats the final structured JSON response using OpenAI for summary generation.
+Formats the final structured JSON response using Gemini for summary generation.
 Includes error handling, retry logic, and safe JSON parsing.
 """
 
@@ -13,23 +13,8 @@ from config import get_settings
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
-SUMMARY_PROMPT = """Summarize this scam engagement conversation in 2-3 concise sentences.
-
-SCAM TYPE: {scam_type}
-CONVERSATION:
-{conversation}
-
-EXTRACTED ENTITIES:
-- Bank Accounts: {bank_accounts}
-- UPI IDs: {upi_ids}
-- Phishing URLs: {phishing_urls}
-
-Focus on:
-- What type of scam was attempted
-- What tactics the scammer used
-- What intelligence was gathered
-
-Keep the summary under 150 words. Be factual and professional."""
+SUMMARY_PROMPT = """Summarize this scam engagement (2-3 sentences).
+Focus on: Scam type, tactics, and intelligence gathered. Concise and factual."""
 
 
 def response_formatter_agent(state: Dict[str, Any]) -> Dict[str, Any]:
@@ -47,7 +32,7 @@ def response_formatter_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     })
     
     try:
-        # Generate conversation summary using OpenAI
+        # Generate conversation summary using Gemini
         summary = _generate_summary(state, entities)
     except Exception as e:
         logger.error(f"Summary generation failed: {e}")
@@ -111,7 +96,7 @@ def _generate_summary(state: Dict[str, Any], entities: Dict) -> str:
     return call_llm(
         prompt=prompt, 
         system_instruction="You are an expert summarizer.",
-        agent_name="response"  # Uses gpt-3.5-turbo
+        agent_name="response"
     )
 
 

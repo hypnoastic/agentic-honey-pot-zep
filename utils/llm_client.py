@@ -1,13 +1,11 @@
-"""
-LLM Client with per-agent model selection.
-Supports GPT-4o family models: gpt-4o, gpt-4o-mini
-"""
-
 import logging
 import time
+import asyncio
 from typing import Optional, List, Dict, Union
 import openai
 from openai import OpenAI, AsyncOpenAI, APIError, RateLimitError, APITimeoutError
+from google import genai
+from google.genai import types
 from config import get_settings, get_model_for_agent
 
 logger = logging.getLogger(__name__)
@@ -27,15 +25,24 @@ class LLMClient:
         if self._initialized:
             return
             
-        self.api_key = settings.openai_api_key
-        if not self.api_key:
-            logger.warning("OPENAI_API_KEY not found in settings!")
+        # OpenAI (for Embeddings)
+        self.openai_api_key = settings.openai_api_key
+        if not self.openai_api_key:
+            logger.warning("OPENAI_API_KEY not found in settings! Embeddings will fail.")
+        
+        self.openai_client = OpenAI(api_key=self.openai_api_key, timeout=settings.openai_timeout)
+        self.openai_async_client = AsyncOpenAI(api_key=self.openai_api_key, timeout=settings.openai_timeout)
+        
+        # Gemini (for Agents)
+        self.gemini_api_key = settings.gemini_api_key
+        if not self.gemini_api_key:
+            logger.error("GEMINI_API_KEY not found in settings! Agents will fail.")
+            raise ValueError("GEMINI_API_KEY is required for agent migration.")
             
-        self.client = OpenAI(api_key=self.api_key, timeout=settings.openai_timeout)
-        self.async_client = AsyncOpenAI(api_key=self.api_key, timeout=settings.openai_timeout)
-        self.default_model = settings.openai_model
+        self.gemini_client = genai.Client(api_key=self.gemini_api_key)
+        
         self._initialized = True
-        logger.info(f"LLMClient initialized with default model: {self.default_model}")
+        logger.info(f"LLMClient initialized. Agents use Gemini, Embeddings use OpenAI.")
 
     def generate_response(
         self, 
@@ -47,14 +54,7 @@ class LLMClient:
         temperature: float = 0.0
     ) -> str:
         """
-        Generate a response from OpenAI with retry logic.
-        
-        Args:
-            prompt: User prompt
-            system_instruction: System instruction
-            json_mode: Whether to force JSON response
-            model: Override model (optional)
-            agent_name: Agent name for automatic model selection (optional)
+        Generate a response from Gemini with retry logic.
         """
         # Determine model to use
         if model:
@@ -62,39 +62,38 @@ class LLMClient:
         elif agent_name:
             use_model = get_model_for_agent(agent_name)
         else:
-            use_model = self.default_model
+            use_model = settings.planner_model or "gemini-2.0-flash"
             
-        messages = []
-        if system_instruction:
-            messages.append({"role": "system", "content": system_instruction})
-        messages.append({"role": "user", "content": prompt})
+        if use_model.lower().startswith("gpt"):
+            logger.warning(f"⚠️ WARNING: Agent '{agent_name}' is attempting to use GPT model: {use_model}")
 
-        settings = get_settings()
-        retries = settings.api_retry_attempts
+        settings_local = get_settings()
+        retries = settings_local.api_retry_attempts
         last_error = None
+
+        config = types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            temperature=temperature,
+            response_mime_type="application/json" if json_mode else "text/plain"
+        )
 
         for attempt in range(retries):
             try:
-                # logger.debug(f"LLM call with model={use_model}, agent={agent_name}")
-                response = self.client.chat.completions.create(
+                response = self.gemini_client.models.generate_content(
                     model=use_model,
-                    messages=messages,
-                    temperature=temperature,
-                    response_format={"type": "json_object"} if json_mode else None
+                    contents=prompt,
+                    config=config
                 )
-                return response.choices[0].message.content
+                return response.text
                 
-            except (RateLimitError, APITimeoutError, APIError) as e:
+            except Exception as e:
                 last_error = e
                 wait_time = 2 ** attempt
-                logger.warning(f"OpenAI API Error (Attempt {attempt+1}/{retries}): {e}. Retrying in {wait_time}s...")
+                logger.warning(f"Gemini API Error (Attempt {attempt+1}/{retries}): {e}. Retrying in {wait_time}s...")
                 time.sleep(wait_time)
-            except Exception as e:
-                logger.error(f"Unexpected OpenAI Error: {e}")
-                raise e
         
-        logger.error(f"Failed to generate response after {retries} attempts. Last error: {last_error}")
-        raise last_error or Exception("Unknown error in LLM generation")
+        logger.error(f"Failed to generate Gemini response after {retries} attempts. Last error: {last_error}")
+        raise last_error or Exception("Unknown error in Gemini generation")
 
     async def generate_response_async(
         self, 
@@ -106,7 +105,7 @@ class LLMClient:
         temperature: float = 0.0
     ) -> str:
         """
-        Generate a response from OpenAI ASYNC with retry logic.
+        Generate a response from Gemini ASYNC with retry logic.
         """
         # Determine model to use
         if model:
@@ -114,49 +113,53 @@ class LLMClient:
         elif agent_name:
             use_model = get_model_for_agent(agent_name)
         else:
-            use_model = self.default_model
+            use_model = settings.planner_model or "gemini-2.0-flash"
             
-        messages = []
-        if system_instruction:
-            messages.append({"role": "system", "content": system_instruction})
-        messages.append({"role": "user", "content": prompt})
+        if use_model.lower().startswith("gpt"):
+            logger.warning(f"⚠️ WARNING: Agent '{agent_name}' is attempting to use GPT model: {use_model}")
 
-        settings = get_settings()
-        retries = settings.api_retry_attempts
+        settings_local = get_settings()
+        retries = settings_local.api_retry_attempts
         last_error = None
+
+        config = types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            temperature=temperature,
+            response_mime_type="application/json" if json_mode else "text/plain"
+        )
 
         for attempt in range(retries):
             try:
-                response = await self.async_client.chat.completions.create(
+                # google-genai SDK 1.x generate_content is synchronous but can be wrapped or used if there's an async counterpart.
+                # Currently, google-genai Client.models.generate_content is synchronous.
+                # If we need true async, we might need a different approach, but for now we wrap it.
+                response = await asyncio.to_thread(
+                    self.gemini_client.models.generate_content,
                     model=use_model,
-                    messages=messages,
-                    temperature=temperature,
-                    response_format={"type": "json_object"} if json_mode else None
+                    contents=prompt,
+                    config=config
                 )
-                return response.choices[0].message.content
+                return response.text
                 
-            except (RateLimitError, APITimeoutError, APIError) as e:
+            except Exception as e:
                 last_error = e
                 wait_time = 2 ** attempt
-                logger.warning(f"Async OpenAI API Error (Attempt {attempt+1}/{retries}): {e}. Retrying in {wait_time}s...")
+                logger.warning(f"Async Gemini API Error (Attempt {attempt+1}/{retries}): {e}. Retrying in {wait_time}s...")
                 await asyncio.sleep(wait_time)
-            except Exception as e:
-                logger.error(f"Unexpected Async OpenAI Error: {e}")
-                raise e
         
-        logger.error(f"Failed to generate async response after {retries} attempts. Last error: {last_error}")
-        raise last_error or Exception("Unknown error in LLM generation")
+        logger.error(f"Failed to generate async Gemini response after {retries} attempts. Last error: {last_error}")
+        raise last_error or Exception("Unknown error in Gemini generation")
 
     async def get_embedding(self, text: str) -> List[float]:
-        """Generate embedding for text using OpenAI."""
+        """Generate embedding for text using OpenAI (STRICT)."""
         if not text:
             return []
             
+        model = settings.embedding_model
         try:
-            # Use small embedding model
-            response = self.client.embeddings.create(
+            response = self.openai_client.embeddings.create(
                 input=text.replace("\n", " "),
-                model="text-embedding-3-small"
+                model=model
             )
             return response.data[0].embedding
         except Exception as e:
@@ -165,27 +168,22 @@ class LLMClient:
 
     async def get_embeddings_batch(self, texts: List[str]) -> List[List[float]]:
         """
-        Generate embeddings for a batch of texts using OpenAI.
-        Significantly faster than sequential calls.
+        Generate embeddings for a batch of texts using OpenAI (STRICT).
         """
         if not texts:
             return []
             
+        model = settings.embedding_model
         try:
-            # Replace newlines
             clean_texts = [t.replace("\n", " ") for t in texts]
-            
-            response = self.client.embeddings.create(
+            response = self.openai_client.embeddings.create(
                 input=clean_texts,
-                model="text-embedding-3-small"
+                model=model
             )
-            
-            # OpenAI guarantees order matches input
             return [data.embedding for data in response.data]
             
         except Exception as e:
             logger.error(f"Error generating batch embeddings: {e}")
-            # Fallback to sequential if batch fails? No, raise error.
             raise e
 
 
@@ -208,19 +206,13 @@ def call_llm(
     temperature: float = 0.0
 ) -> str:
     """
-    Helper function to call the singleton client.
+    Helper function to call the singleton client (Gemini for agents).
     
     Args:
         prompt: User prompt
         system_instruction: System instruction
         json_mode: Whether to force JSON response
         agent_name: Agent name for automatic model selection
-            - 'planner': Uses gpt-4o-mini
-            - 'detection': Uses gpt-4o-mini
-            - 'persona': Uses gpt-4o-mini
-            - 'response': Uses gpt-4o-mini
-            - 'extraction': Uses gpt-4o-mini
-            - 'judge': Uses gpt-4o-mini
     """
     client = get_llm_client()
     return client.generate_response(
@@ -239,7 +231,7 @@ async def call_llm_async(
     agent_name: Optional[str] = None,
     temperature: float = 0.0
 ) -> str:
-    """Helper function for async LLM calls."""
+    """Helper function for async Gemini calls."""
     client = get_llm_client()
     return await client.generate_response_async(
         prompt=prompt, 
@@ -251,17 +243,12 @@ async def call_llm_async(
 
 
 async def get_embedding(text: str) -> List[float]:
-    """Helper to get embeddings."""
+    """Helper to get OpenAI embeddings."""
     client = get_llm_client()
-    # Ensure client is initialized
-    if not hasattr(client, 'client'): 
-        client = LLMClient()
     return await client.get_embedding(text)
 
 
 async def get_embeddings_batch(texts: List[str]) -> List[List[float]]:
-    """Helper to get batch embeddings."""
+    """Helper to get batch OpenAI embeddings."""
     client = get_llm_client()
-    if not hasattr(client, 'client'):
-        client = LLMClient()
     return await client.get_embeddings_batch(texts)

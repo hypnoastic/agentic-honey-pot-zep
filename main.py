@@ -28,8 +28,8 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
-    logger.info("Agentic Honey-Pot API starting up (OpenAI Edition)...")
-    logger.info(f"OpenAI Model: {settings.openai_model}")
+    logger.info("Agentic Honey-Pot API starting up (Gemini Flash Migration)...")
+    get_settings().validate_setup()
     logger.info(f"Max engagement turns: {settings.max_engagement_turns}")
     
     # Log Memory status

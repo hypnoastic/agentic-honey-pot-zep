@@ -1,7 +1,7 @@
 """
 Persona Engagement Agent
 Creates a believable human persona to engage with scammers.
-Uses OpenAI to dynamically GENERATE a unique victim profile and engage naturally.
+Uses Gemini Flash to dynamically GENERATE a unique victim profile and engage naturally.
 """
 
 import json
@@ -12,12 +12,12 @@ import httpx
 from typing import Dict, Any, List
 from utils.llm_client import call_llm
 from config import get_settings
+from utils.parsing import parse_json_safely
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
-# Prompt to GENERATE a brand new persona based on the scam context
-PERSONA_GENERATION_PROMPT = """Analyze the incoming scam message and GENERATE a realistic victim profile that is most likely to be targeted by this specific scam.
+PERSONA_GENERATION_PROMPT = """Create a realistic Indian victim profile for this scam.
 
 SCAM MESSAGE: "{message}"
 DETECTED SCAM TYPE: {scam_type}
@@ -41,46 +41,36 @@ Respond with JSON ONLY:
     "voice": "Speech style (e.g., Formal, Broken English, Over-eager)"
 }}"""
 
-ENGAGEMENT_PROMPT = """You are acting as a persona in a scambaiting operation. 
-YOUR GOAL: Extract payment details (UPI/Bank/QR) by feigning willingness to pay but encountering "technical errors".
+ENGAGEMENT_PROMPT = """You are a regular person (not an AI) talking to a caller/messenger. Use a natural, informal Indian chat style.
+
+YOUR GOAL: Extract actionable intelligence (UPI IDs, Bank Accounts, URLs, Phone Numbers, Names) within 3-4 turns by being cooperative but "technically challenged."
 
 PERSONA PROFILE:
-Name: {name}
-Age: {age}
-Occupation: {occupation}
+Name: {name} | Age: {age} | Occupation: {occupation}
 Traits: {traits}
 Context: {context}
 Voice/Style: {voice}
 
 SCAM SITUATION:
-Type: {scam_type}
-LATEST SCAMMER MESSAGE: "{latest_message}"
+Type: {scam_type} | Scammer says: "{latest_message}"
 
-STRATEGIC GUIDANCE (FROM PLANNER):
+STRATEGIC GUIDANCE (PLANNER):
 {strategy_hint}
 
-PREVIOUS RESPONSE TO AVOID:
-"{last_response}"
+HISTORY & CONTEXT:
+Avoid Repeating: "{last_response}"
+Recent Context: {history}
 
-CONVERSATION HISTORY:
-{history}
+CORE BEHAVIORS:
+1. PRIORITIZE EXTRACTION: Don't argue or debate morals. Show mild confusion or compliance. "Okay, I'm trying. Where do I send it?"
+2. TARGET DATA: Ask for UPI ID, Bank Acc, IFSC, Website link, or a callback number early. "Can you share the UPI ID directly?" or "Is there a website link for this?"
+3. REDUCE WASTE: Combine 2-3 related questions naturally. "What's the account name and number? Also, is there a website link to check this deal?"
+4. HUMANIZATION: Use mild hesitation (like "um...", "one sec..."). Vary sentence structure. NEVER repeat an emotional reaction (no "Oh my God" loops).
+5. CONCISE: Keep replies to 1-3 short, natural sentences. Avoid robotic lists.
+6. PLAY CHARACTER: Stay in character (e.g., Retirees are formal/slow, Students are casual).
+7. STEALTH: Never hint you are baiting. Sound like a real person trying to comply with "Server Busy" or "Payment Failed" errors.
 
-INSTRUCTIONS:
-1. ADOPT THE VOICE: Use the specific language style defined in 'Voice'.
-2. BE CONCISE: Limit response to 1-3 short sentences. NO long paragraphs.
-3. NO BACKSTORIES: Do not explain your life story unless explicitly asked.
-4. BE NATURAL: Avoid overly dramatic or poetic language. Speak like a normal person on a chat app.
-5. ENGAGE: Ask one specific question or give one specific answer.
-6. FOLLOW STRATEGY: Incorporate the "Strategic Guidance" naturally.
-7. NEVER reveal you are an AI.
-8. DO NOT REPEAT YOURSELF: You recently said: "{last_response}". Do NOT say this again. VARY your phrasing.
-9. PLAY THE VICTIM: Act scared and willing to comply. Do NOT ask for definitions of common terms (like OTP/UPI and more general bank terms) more than once.
-10. FAILED COMPLIANCE: Claim you tried to send money/details but it failed. Error messages like "Server Busy", "Payment Declined", or "Invalid ID".
-11. FORCE ALTERNATIVES: Ask for a DIFFERENT way to pay. "Is there a QR code?", "Can I use GPay instead?", "Give me another account number, this one isn't working."
-12. CONFIRM DETAILS: If they send numbers, read them back incorrectly to force them to correct you. "Is it 4567 or 4576?"
-13. ASK FOR VERIFICATION: "Is there a website where I can see this?", "Can you send a link?", "What is the official number I should call?" to extract URLs and Phone Numbers.
-
-Respond with ONLY your dialouge."""
+Respond ONLY with natural dialogue."""
 
 
 
@@ -176,9 +166,19 @@ def _generate_unique_persona(state: Dict[str, Any]) -> Dict:
             prompt=prompt,
             system_instruction="You are a creative writer generating fictional character profiles.",
             json_mode=True,
-            agent_name="persona"  # Uses gpt-5-mini
+            agent_name="persona"
         )
-        return json.loads(response_text)
+        persona = parse_json_safely(response_text)
+        
+        # Handle cases where LLM returns a list [item]
+        if isinstance(persona, list) and len(persona) > 0:
+            persona = persona[0]
+            
+        if not isinstance(persona, dict):
+            logger.warning(f"Persona generation returned non-dict: {type(persona)}")
+            raise ValueError("Invalid persona format generated")
+            
+        return persona
         
     except Exception as e:
         logger.error(f"Persona generation error: {e}")
@@ -226,6 +226,6 @@ def _generate_response(state: Dict[str, Any], persona: Dict, history: List) -> s
     return call_llm(
         prompt=prompt,
         system_instruction="You are a method actor playing a scam victim.",
-        agent_name="response",  # Uses gpt-4o-mini
+        agent_name="response",
         temperature=0.7
     )

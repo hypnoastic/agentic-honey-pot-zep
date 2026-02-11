@@ -28,7 +28,7 @@ def _sanitize_input(message: str) -> str:
 
 
 
-SCAM_DETECTION_PROMPT = """You are an expert scam detection system. Analyze the following message and determine if it is a scam attempt.
+SCAM_DETECTION_PROMPT = """Analyze for scam intent. JSON ONLY.
 
 MESSAGE TO ANALYZE:
 {message}
@@ -51,12 +51,12 @@ Analyze for these scam indicators:
 Respond ONLY with a valid JSON object in this exact format:
 {{
     "scam_detected": true/false,
-    "scam_type": "TYPE_FROM_ABOVE or null",
+    "scam_type": "TYPE or null",
     "confidence": 0.0-1.0,
-    "indicators": ["list", "of", "specific", "indicators", "found"],
-    "behavioral_signals": ["list", "of", "psychological", "triggers", "e.g. Urgency, Greed"],
-    "confidence_factors": {{"Specific Keyword": 0.0-1.0, "Link Analysis": 0.0-1.0}},
-    "reasoning": "Brief explanation of your analysis"
+    "indicators": ["signal1", "signal2"],
+    "behavioral_signals": ["Urgency", "Fear"],
+    "confidence_factors": {{"key": 0.5}},
+    "reasoning": "Direct evidence explanation"
 }}
 
 Important: Respond ONLY with the JSON, no other text."""
@@ -64,7 +64,7 @@ Important: Respond ONLY with the JSON, no other text."""
 
 async def scam_detection_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Analyze the incoming message for scam indicators using GPT-5-mini.
+    Analyze the incoming message for scam indicators.
     Integrates fact-checker results if available.
     """
     message = state.get("original_message", "")
@@ -108,7 +108,7 @@ Claims Checked: {fact_check_results.get('claims_checked', 0)}
             prompt=prompt,
             system_instruction="You are an expert scam detection AI.",
             json_mode=True,
-            agent_name="detection"  # Uses gpt-5-mini
+            agent_name="detection"
         )
         
         analysis = parse_json_safely(response_text)

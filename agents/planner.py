@@ -20,8 +20,8 @@ from utils.llm_client import call_llm
 
 logger = logging.getLogger(__name__)
 
-PLANNER_PROMPT = """You are the STRATEGIC PLANNER for an AI Honey-Pot system.
-Your goal is to waste the scammer's time (scambaiting) and extract intelligence (bank accounts, UPIs, phishing URLs).
+PLANNER_PROMPT = """STRATEGIC PLANNER: Waste time AND extract intelligence (Bank, UPI, URL, Phone).
+GOAL: High-efficiency extraction (3-4 turns target).
 
 CURRENT STATE:
 - Scam Detected: {scam_detected}
@@ -54,25 +54,12 @@ EXTRACTED EVIDENCE:
 - Scam Indicators: {scam_indicators}
 
 DECISION LOGIC:
-1. "engage": Keep the conversation going. Ask questions, stall, waste their time.
-2. "judge": Conclude the conversation when:
-   - We have successfully extracted valuable intelligence (bank accounts, UPI IDs, URLs)
-   - Max turns ({max_turns}) reached
-   - Scammer has stopped responding or ended conversation
-   - Diminishing returns (scammer is repeating themselves with no new info)
-3. "end": ONLY if it is clearly NOT a scam.
+1. "engage": Stall/Waste time. Ask for verification, payment details, or official links.
+2. "judge": Conclude if: Key info extracted, Max turns reached, or Scammer stopped.
+3. "end": Only if NOT a scam.
 
-WHEN action="judge", YOU MUST ALSO PROVIDE:
-- verdict: "GUILTY" (confirmed scam), "INNOCENT" (not a scam), or "SUSPICIOUS" (likely scam but inconclusive)
-- confidence_score: 0.0-1.0
-- reasoning: Brief explanation of your verdict
-
-SMART EXIT CRITERIA (DIVERSITY-AWARE):
-- We prioritize "Identity Diversity" over simple count. 
-- Capturing multiple types (Bank, UPI, Phone, URL) is significantly more valuable than capturing multiple of the same type.
-- Early turns require high yield AND diversity to exit.
-- TURN 10 IS A HARD CAP.
-- Aim to capture the "Intelligence quartet" for a perfect score.
+DIVERSITY EXIT: Prioritize getting different types (UPI+Bank+URL) over count.
+Target 3-4 focused turns.
 
 Respond with JSON ONLY:
 {{
