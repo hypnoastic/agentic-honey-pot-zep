@@ -116,7 +116,7 @@ async def _intelligence_extraction_node(state: HoneypotState) -> Dict[str, Any]:
 
 async def _regex_extractor_node(state: HoneypotState) -> Dict[str, Any]:
     from agents.intelligence_extraction import regex_only_extraction_agent
-    return await regex_only_extraction_agent(dict(state))
+    return regex_only_extraction_agent(dict(state))
 
 def _response_formatter_node(state: HoneypotState) -> Dict[str, Any]:
     return response_formatter_agent(dict(state))
