@@ -197,8 +197,8 @@ async def _load_system_memory(conversation_id: str, message: str, txn_conn: Any)
         )
         from agents.fact_checker import fact_check_message
         
-        # Get scam type from state for targeted queries (fixes dead learning loop)
-        scam_type = state.get("scam_type") or state.get("prefilter_scam_type") or "scam"
+        # Use default scam_type (will be refined by scam_detection_agent later)
+        scam_type = "scam"
         
         # Parallel calls for independent queries (2-4s savings)
         session_mem_task = load_conversation_memory(conversation_id, conn=txn_conn)
