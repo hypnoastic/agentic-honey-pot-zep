@@ -46,20 +46,21 @@ async def get_detection_detail(session_id: str):
     return details
 
 # --- Live Logs (WebSocket) ---
-@router.websocket("/ws/logs")
-async def websocket_logs(websocket: WebSocket):
-    """Stream live logs to dashboard."""
-    await websocket.accept()
-    queue = asyncio.Queue()
-    AgentLogger.register_queue(queue)
-    
-    try:
-        while True:
-            # Wait for log entry
-            data = await queue.get()
-            await websocket.send_json(data)
-    except WebSocketDisconnect:
-        AgentLogger.remove_queue(queue)
-    except Exception as e:
-        logger.error(f"WebSocket error: {e}")
-        AgentLogger.remove_queue(queue)
+# NOTE: This is overridden in main.py for better proxy compatibility (root registration)
+# @router.websocket("/ws/logs")
+# async def websocket_logs(websocket: WebSocket):
+#     """Stream live logs to dashboard."""
+#     await websocket.accept()
+#     queue = asyncio.Queue()
+#     AgentLogger.register_queue(queue)
+#     
+#     try:
+#         while True:
+#             # Wait for log entry
+#             data = await queue.get()
+#             await websocket.send_json(data)
+#     except WebSocketDisconnect:
+#         AgentLogger.remove_queue(queue)
+#     except Exception as e:
+#         logger.error(f"WebSocket error: {e}")
+#         AgentLogger.remove_queue(queue)
