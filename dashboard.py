@@ -21,6 +21,8 @@ async def login(request: LoginRequest):
     """Simple password check."""
     if request.password == settings.dashboard_password:
         return {"status": "success"}
+    
+    logger.warning(f"Login failed. Attempted: '{request.password}' vs Configured: '{settings.dashboard_password}'")
     raise HTTPException(status_code=401, detail="Invalid password")
 
 # --- Stats ---
