@@ -124,7 +124,7 @@ async def health_check():
         "status": "healthy",
         "service": "agentic-honeypot-api",
         "version": "1.1.0",
-        "openai_model": settings.openai_model,
+        "model_used": settings.detection_model,
         "memory_backend": "postgres" if settings.database_url else "disabled"
     }
 
@@ -255,25 +255,41 @@ async def root_post(request: Request):
     """Compatibility endpoint for testers posting to root."""
     return {"status": "ready", "message": "Please use /analyze endpoint"}
 
-@app.get("/")
-async def root():
-    """Root endpoint with API information."""
-    return {
-        "name": "Agentic Honey-Pot API",
-        "version": "1.1.0",
-        "description": "Multi-agent scam detection and intelligence extraction with Neon PostgreSQL memory",
-        "model_provider": "OpenAI",
-        "features": {
-            "memory": "Persistent conversational memory (PgVector) for multi-turn context",
-            "multi_agent": "LangGraph-orchestrated agent pipeline",
-            "scam_detection": "Advanced LLM-based scam analysis"
-        },
-        "endpoints": {
-            "analyze": "POST /analyze - Analyze message for scams",
-            "health": "GET /health - Health check",
-            "docs": "GET /docs - API documentation"
+from dashboard import router as dashboard_router
+from fastapi.staticfiles import StaticFiles
+from starlette.responses import FileResponse
+import os
+
+app.include_router(dashboard_router)
+
+# Serve Frontend (React Build)
+frontend_dist = os.path.join(os.path.dirname(__file__), "frontend", "dist")
+if os.path.exists(frontend_dist):
+    app.mount("/assets", StaticFiles(directory=os.path.join(frontend_dist, "assets")), name="assets")
+    
+    @app.get("/")
+    async def serve_dashboard():
+        return FileResponse(os.path.join(frontend_dist, "index.html"))
+else:
+    @app.get("/")
+    async def root():
+        """Root endpoint with API information (Frontend not built)."""
+        return {
+            "name": "Agentic Honey-Pot API",
+            "version": "1.1.0",
+            "description": "Multi-agent scam detection and intelligence extraction with Neon PostgreSQL memory",
+            "model_provider": "OpenAI",
+            "features": {
+                "memory": "Persistent conversational memory (PgVector) for multi-turn context",
+                "multi_agent": "LangGraph-orchestrated agent pipeline",
+                "scam_detection": "Advanced LLM-based scam analysis"
+            },
+            "endpoints": {
+                "analyze": "POST /analyze - Analyze message for scams",
+                "health": "GET /health - Health check",
+                "docs": "GET /docs - API documentation"
+            }
         }
-    }
 
 
 if __name__ == "__main__":

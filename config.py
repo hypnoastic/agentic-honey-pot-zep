@@ -90,6 +90,11 @@ class Settings(BaseSettings):
     # Logging
     log_level: str = os.getenv("LOG_LEVEL", "DEBUG")
 
+    # Dashboard
+    dashboard_password: str = os.getenv("DASHBOARD_PASSWORD", "admin")
+
+
+
 
 @lru_cache()
 def get_settings() -> Settings:

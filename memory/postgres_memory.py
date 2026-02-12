@@ -603,3 +603,125 @@ async def capture_session_lock(session_id: str):
                 yield conn
             finally:
                 logger.info(f"[LOCK] Releasing lock for {session_id}")
+
+async def get_dashboard_stats() -> Dict[str, Union[int, float]]:
+    """
+    Get aggregated stats for the dashboard:
+    1. Total Successful Scams Detected
+    2. Total Failures (Engagement Failures)
+    3. Total Estimated Cost (Calculated from token usage estimation or just flat rate per turn)
+    """
+    pool = await _get_pool()
+    if not pool:
+        return {"scams_detected": 0, "failures": 0, "est_cost": 0.0}
+
+    try:
+        async with pool.acquire() as conn:
+            # 1. Scams Detected
+            scams = await conn.fetchval(
+                "SELECT COUNT(*) FROM intelligence WHERE event_type = 'scam_detected'"
+            )
+            
+            # 2. Failures
+            failures = await conn.fetchval(
+                "SELECT COUNT(*) FROM intelligence WHERE event_type = 'engagement_failure'"
+            )
+            
+            # 3. Est. Cost
+            # We don't have exact billing data, so we estimate based on total messages * avg cost per message
+            # Let's say $0.001 per message for now as a rough estimate for Gemini Flash
+            total_messages = await conn.fetchval("SELECT COUNT(*) FROM messages")
+            est_cost = total_messages * 0.001
+
+            return {
+                "scams_detected": scams,
+                "failures": failures,
+                "est_cost": est_cost
+            }
+    except Exception as e:
+        logger.error(f"Dashboard stats failed: {e}")
+        return {"scams_detected": 0, "failures": 0, "est_cost": 0.0}
+
+
+async def get_recent_detections(limit: int = 20, offset: int = 0) -> List[Dict[str, Any]]:
+    """Get list of recent scam detections for infinite scroll."""
+    pool = await _get_pool()
+    if not pool: return []
+
+    try:
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT session_id, scam_type, summary, created_at, payload 
+                FROM intelligence 
+                WHERE event_type = 'scam_detected'
+                ORDER BY created_at DESC
+                LIMIT $1 OFFSET $2
+                """,
+                limit, offset
+            )
+            
+            results = []
+            for r in rows:
+                p = r['payload']
+                if isinstance(p, str):
+                    p = json.loads(p)
+                
+                results.append({
+                    "id": r['session_id'],
+                    "type": r['scam_type'],
+                    "summary": r['summary'],
+                    "timestamp": r['created_at'].isoformat(),
+                    "confidence": p.get('confidence', 0),
+                    "turns": p.get('turns', 0)
+                })
+            return results
+    except Exception as e:
+        logger.error(f"Recent detections failed: {e}")
+        return []
+
+async def get_detection_details(session_id: str) -> Optional[Dict[str, Any]]:
+    """Get full details for a specific detection."""
+    pool = await _get_pool()
+    if not pool: return None
+
+    try:
+        async with pool.acquire() as conn:
+            # Fetch intelligence event
+            event = await conn.fetchrow(
+                "SELECT * FROM intelligence WHERE session_id = $1 AND event_type = 'scam_detected'",
+                session_id
+            )
+            if not event: return None
+            
+            # Fetch conversation history
+            messages = await conn.fetch(
+                "SELECT role, content, created_at FROM messages WHERE session_id = $1 ORDER BY created_at ASC",
+                session_id
+            )
+            
+            payload = event['payload']
+            if isinstance(payload, str):
+                payload = json.loads(payload)
+
+            full_details = {
+                "id": event['session_id'],
+                "scam_type": event['scam_type'],
+                "summary": event['summary'],
+                "timestamp": event['created_at'].isoformat(),
+                "confidence": payload.get('confidence'),
+                "extracted_entities": payload.get('entities', {}),
+                "persona_traits": payload.get('persona_traits', {}),
+                "messages": [
+                    {
+                        "role": m['role'],
+                        "content": m['content'],
+                        "timestamp": m['created_at'].isoformat()
+                    } for m in messages
+                ]
+            }
+            return full_details
+    except Exception as e:
+        logger.error(f"Detection details failed: {e}")
+        return None
+
