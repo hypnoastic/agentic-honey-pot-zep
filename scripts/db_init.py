@@ -77,8 +77,13 @@ async def init_db():
             );
         """)
 
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_intelligence_embedding ON intelligence USING hnsw (embedding vector_cosine_ops);")
+        # Optimized HNSW index with tuned parameters
+        await conn.execute("""CREATE INDEX IF NOT EXISTS idx_intelligence_embedding 
+            ON intelligence USING hnsw (embedding vector_cosine_ops) 
+            WITH (m = 24, ef_construction = 128);""")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_intelligence_type ON intelligence(event_type, scam_type);")
+        # Composite index for common queries
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_intelligence_composite ON intelligence(event_type, scam_type, created_at DESC);")
         
         logger.info("Database initialization complete.")
         await conn.close()

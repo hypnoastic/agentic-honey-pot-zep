@@ -9,7 +9,7 @@ Response Formatter Agent (Production Optimized)
 import json
 import logging
 from typing import Dict, Any
-from utils.llm_client import call_llm
+from utils.llm_client import call_llm_async
 from config import get_settings
 
 settings = get_settings()
@@ -45,7 +45,7 @@ Be factual and professional.
 # MAIN AGENT
 # =========================================================
 
-def response_formatter_agent(state: Dict[str, Any]) -> Dict[str, Any]:
+async def response_formatter_agent(state: Dict[str, Any]) -> Dict[str, Any]:
 
     is_scam = state.get("scam_detected", False)
     scam_type = state.get("scam_type", "Unknown")
@@ -54,7 +54,7 @@ def response_formatter_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     entities = state.get("extracted_entities", {}) or {}
 
     try:
-        summary = _generate_summary(state, entities)
+        summary = await _generate_summary(state, entities)
     except Exception as e:
         logger.error(f"Summary generation failed: {e}")
         summary = _fallback_summary(state, entities)
@@ -64,9 +64,9 @@ def response_formatter_agent(state: Dict[str, Any]) -> Dict[str, Any]:
         "scam_type": scam_type,
         "confidence_score": confidence,
         "extracted_entities": {
-            "bank_accounts": entities.get("bank_accounts", []),
-            "upi_ids": entities.get("upi_ids", []),
-            "phishing_urls": entities.get("phishing_urls", [])
+            "bank_accounts": _flatten_entities(entities.get("bank_accounts", [])),
+            "upi_ids": _flatten_entities(entities.get("upi_ids", [])),
+            "phishing_urls": _flatten_entities(entities.get("phishing_urls", []))
         },
         "behavioral_signals": state.get("behavioral_signals", []),
         "confidence_factors": state.get("confidence_factors", {}),
@@ -87,10 +87,16 @@ def response_formatter_agent(state: Dict[str, Any]) -> Dict[str, Any]:
 # SUMMARY GENERATION (TOKEN SAFE)
 # =========================================================
 
-def _generate_summary(state: Dict[str, Any], entities: Dict) -> str:
+async def _generate_summary(state: Dict[str, Any], entities: Dict) -> str:
 
     if not state.get("scam_detected", False):
         return "Message analyzed and determined to be non-malicious."
+    
+    # Skip LLM for first turn (1s savings)
+    engagement_count = state.get("engagement_count", 0)
+    if engagement_count == 0:
+        scam_type = state.get("scam_type", "Unknown")
+        return f"Scam detected: {scam_type}. Engagement initiated."
 
     scam_type = state.get("scam_type", "Unknown")
     conversation_history = state.get("conversation_history", [])
@@ -117,7 +123,7 @@ def _generate_summary(state: Dict[str, Any], entities: Dict) -> str:
         phishing_urls=", ".join(phishing_urls) or "None"
     )
 
-    return call_llm(
+    return await call_llm_async(
         prompt=prompt,
         system_instruction="You are a cybersecurity analyst summarizing scam intelligence.",
         agent_name="summary",  # ✅ Separate model name in .env

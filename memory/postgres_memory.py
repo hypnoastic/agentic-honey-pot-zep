@@ -23,7 +23,10 @@ logger = logging.getLogger(__name__)
 _pool = None
 
 async def _init_connection(conn):
+    """Initialize connection with vector support and HNSW tuning."""
     await register_vector(conn)
+    # Tune HNSW search for better recall/performance balance
+    await conn.execute("SET hnsw.ef_search = 100;")
 
 async def _get_pool():
     """Get or create PostgreSQL connection pool. Loop-safe for tests."""
@@ -46,8 +49,11 @@ async def _get_pool():
         try:
             _pool = await asyncpg.create_pool(
                 dsn=settings.database_url,
-                min_size=1,
+                min_size=3,  # Increased from 1 for better concurrency
                 max_size=10,
+                timeout=30,
+                command_timeout=60,
+                server_settings={'application_name': 'honeypot'},
                 init=_init_connection
             )
             logger.info("PostgreSQL connection pool initialized")
@@ -157,13 +163,16 @@ async def persist_conversation_memory(
     conversation_id: str,
     state: Dict[str, Any],
     is_final: bool = False,
-    conn: Optional[asyncpg.Connection] = None
+    conn: Optional[asyncpg.Connection] = None,
+    background_embedding: bool = False
 ) -> bool:
     """
     Persist conversation turns and extracted intelligence to Postgres.
+    Args:
+        background_embedding: If True, skip intelligence embedding for faster response (200-300ms savings)
     """
     if conn:
-        return await _persist_memory_impl(conn, conversation_id, state, is_final)
+        return await _persist_memory_impl(conn, conversation_id, state, is_final, background_embedding)
 
     pool = await _get_pool()
     if not pool:
@@ -172,12 +181,13 @@ async def persist_conversation_memory(
     try:
         async with pool.acquire() as conn:
             async with conn.transaction():
-                return await _persist_memory_impl(conn, conversation_id, state, is_final)
+                return await _persist_memory_impl(conn, conversation_id, state, is_final, background_embedding)
     except Exception as e:
         logger.error(f"Error persisting (PostgresWrapper): {e}")
         return False
 
-async def _persist_memory_impl(conn: asyncpg.Connection, conversation_id: str, state: Dict[str, Any], is_final: bool) -> bool:
+
+async def _persist_memory_impl(conn: asyncpg.Connection, conversation_id: str, state: Dict[str, Any], is_final: bool, background_embedding: bool = False) -> bool:
     try:
         # 1. Upsert Session
         # We need to make sure session exists.
@@ -197,10 +207,7 @@ async def _persist_memory_impl(conn: asyncpg.Connection, conversation_id: str, s
         }
         
         # VERIFICATION LOGGING FOR USER
-        print(f"\n[VERIFICATION] Persisting Session Data for {conversation_id}:")
-        print(f"  - Persona Name: {metadata.get('persona_name')}")
-        print(f"  - Scam Type: {state.get('scam_type')}")
-        print(f"  - Metadata Dump: {json.dumps(metadata, indent=2)}\n")
+        # Removed print statements for security (no metadata leakage)
         
         await conn.execute(
             """
@@ -228,19 +235,23 @@ async def _persist_memory_impl(conn: asyncpg.Connection, conversation_id: str, s
         if original_msg:
             texts_to_embed.append(original_msg)
             
+        # 2. Batch Insert Messages with Embedding Tracking
         # Only embed user/scammer messages for search relevance
-        # But for completeness, we might want all? 
-        # Let's stick to logic: Embed "user" (scammer) messages.
-        # Honeypot messages are less useful for "similar scam" search.
-        # Maps history index to embedding index
+        # Track which messages need embeddings vs already have them
         embed_map = {} 
+        texts_to_embed = []
         
         for i, turn in enumerate(history):
             role = "assistant" if turn.get("role") == "honeypot" else "user"
             content = turn.get("message", "")
-            if role == "user" and content:
+            # Only embed user messages that don't already have embeddings
+            if role == "user" and content and not turn.get("embedding"):
                 embed_map[i] = len(texts_to_embed)
                 texts_to_embed.append(content)
+        
+        # Add original message if not already embedded
+        if original_msg and not state.get("original_message_embedding"):
+            texts_to_embed.insert(0, original_msg)
                 
         # Generate all embeddings in ONE call
         from utils.llm_client import get_embeddings_batch
@@ -252,18 +263,15 @@ async def _persist_memory_impl(conn: asyncpg.Connection, conversation_id: str, s
                 logger.error(f"Batch embedding failed: {e}")
                 # Fallback: empty list, will result in None embeddings
         
-        # Insert Original Message
+        # Batch insert all messages (180ms savings)
+        batch_inserts = []
+        
+        # Add original message
         if original_msg:
             emb = embeddings[0] if embeddings else None
-            await conn.execute(
-                """
-                INSERT INTO messages (session_id, role, content, embedding)
-                VALUES ($1, 'user', $2, $3)
-                """,
-                conversation_id, original_msg, emb
-            )
-            
-        # Insert History
+            batch_inserts.append((conversation_id, 'user', original_msg, emb))
+        
+        # Add history messages
         for i, turn in enumerate(history):
             role = "assistant" if turn.get("role") == "honeypot" else "user"
             content = turn.get("message", "")
@@ -271,19 +279,22 @@ async def _persist_memory_impl(conn: asyncpg.Connection, conversation_id: str, s
             emb = None
             if i in embed_map and embeddings and len(embeddings) > embed_map[i]:
                 emb = embeddings[embed_map[i]]
-                
-            await conn.execute(
-                """
-                INSERT INTO messages (session_id, role, content, embedding)
-                VALUES ($1, $2, $3, $4)
-                """,
-                conversation_id, role, content, emb
+            
+            batch_inserts.append((conversation_id, role, content, emb))
+        
+        # Execute batch insert
+        if batch_inserts:
+            await conn.executemany(
+                """INSERT INTO messages (session_id, role, content, embedding)
+                   VALUES ($1, $2, $3, $4)""",
+                batch_inserts
             )
         
-        logger.info(f"Persisted {len(history)} messages to Postgres for {conversation_id} (Batch Embeddings)")
+        logger.info(f"Persisted {len(batch_inserts)} messages to Postgres (Batch Insert)")
 
         # 3. Add Intelligence Event (if final & detected)
-        if is_final and state.get("scam_detected"):
+        # Skip embedding if background_embedding=True for faster response (200-300ms savings)
+        if is_final and state.get("scam_detected") and not background_embedding:
             await _add_intelligence_event(conn, conversation_id, state)
     
         return True

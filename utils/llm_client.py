@@ -1,6 +1,7 @@
 import logging
 import time
 import asyncio
+import threading
 from typing import Optional, List, Dict, Union
 import openai
 from openai import OpenAI, AsyncOpenAI, APIError, RateLimitError, APITimeoutError
@@ -13,12 +14,17 @@ settings = get_settings()
 
 
 class LLMClient:
+    """Singleton LLM client with thread-safe initialization."""
     _instance = None
+    _lock = threading.Lock()
     
     def __new__(cls):
         if cls._instance is None:
-            cls._instance = super(LLMClient, cls).__new__(cls)
-            cls._instance._initialized = False
+            with cls._lock:
+                # Double-check locking pattern
+                if cls._instance is None:
+                    cls._instance = super(LLMClient, cls).__new__(cls)
+                    cls._instance._initialized = False
         return cls._instance
     
     def __init__(self):
@@ -157,7 +163,7 @@ class LLMClient:
             
         model = settings.embedding_model
         try:
-            response = self.openai_client.embeddings.create(
+            response = await self.openai_async_client.embeddings.create(
                 input=text.replace("\n", " "),
                 model=model
             )
@@ -176,7 +182,7 @@ class LLMClient:
         model = settings.embedding_model
         try:
             clean_texts = [t.replace("\n", " ") for t in texts]
-            response = self.openai_client.embeddings.create(
+            response = await self.openai_async_client.embeddings.create(
                 input=clean_texts,
                 model=model
             )

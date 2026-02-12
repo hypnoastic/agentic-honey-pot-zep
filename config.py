@@ -67,6 +67,9 @@ class Settings(BaseSettings):
     # API Security
     api_secret_key: str = os.getenv("API_SECRET_KEY", "langfasthoneypot1234")
     
+    # GUVI Callback
+    guvi_callback_url: str = os.getenv("GUVI_CALLBACK_URL", "")
+    
     # Server
     host: str = os.getenv("HOST", "0.0.0.0")
     port: int = int(os.getenv("PORT", "8000"))
@@ -114,6 +117,7 @@ def get_model_for_agent(agent_name: str) -> str:
         "extraction": settings.extraction_model,
         "judge": settings.judge_model,
         "factcheck": settings.factcheck_model,
+        "summary": settings.response_model,  # Use response model for summaries
     }
     # Default to planner model if not found
     return model_map.get(agent_name, settings.planner_model)

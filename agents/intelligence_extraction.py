@@ -34,8 +34,14 @@ logger = logging.getLogger(__name__)
 LLM_VERIFY_PROMPT = """
 You are a STRICT intelligence verification system.
 
+CONVERSATION TEXT:
+{conversation}
+
+REGEX-DETECTED ENTITIES:
+{regex_entities}
+
 You MUST:
-- Only validate entities present in the text.
+- Only validate entities present in the text above.
 - Recover obfuscated entities ONLY if reconstructable from the text.
 - NEVER invent new values.
 - NEVER guess missing digits.
@@ -118,7 +124,11 @@ async def intelligence_extraction_agent(state: Dict[str, Any]) -> Dict[str, Any]
 
     try:
         conversation_window = conversation_history[-3:]
-        combined_text = "\n".join(t["message"] for t in conversation_window)
+        # Sanitize input to prevent prompt injection
+        combined_text = "\n".join(
+            t["message"].replace("{", "").replace("}", "")[:500]  # Limit length, remove template chars
+            for t in conversation_window
+        )
 
         prompt = LLM_VERIFY_PROMPT.format(
             conversation=combined_text,

@@ -14,7 +14,7 @@ import json
 import random
 import logging
 from typing import Dict, Any, List
-from utils.llm_client import call_llm
+from utils.llm_client import call_llm_async
 from config import get_settings
 from utils.parsing import parse_json_safely
 
@@ -90,13 +90,13 @@ Respond with natural dialogue only.
 # MAIN AGENT
 # =========================================================
 
-def persona_engagement_agent(state: Dict[str, Any]) -> Dict[str, Any]:
+async def persona_engagement_agent(state: Dict[str, Any]) -> Dict[str, Any]:
 
     # -----------------------------
     # Persona Initialization
     # -----------------------------
     if not state.get("persona_name"):
-        persona = _generate_unique_persona(state)
+        persona = await _generate_unique_persona(state)
         state["persona_name"] = persona["name"]
         state["persona_context"] = json.dumps(persona)
 
@@ -106,8 +106,15 @@ def persona_engagement_agent(state: Dict[str, Any]) -> Dict[str, Any]:
             persona["occupation"],
             "Persona Generated"
         )
-
-    persona = json.loads(state.get("persona_context", "{}"))
+    
+    # Load existing persona (skip LLM if already valid)
+    persona_context = state.get("persona_context", "{}")
+    if persona_context and persona_context != "{}":
+        persona = json.loads(persona_context)
+    else:
+        # Fallback: generate if somehow missing
+        persona = await _generate_unique_persona(state)
+        state["persona_context"] = json.dumps(persona)
 
     conversation_history = state.get("conversation_history", [])
     engagement_count = state.get("engagement_count", 0)
@@ -121,7 +128,7 @@ def persona_engagement_agent(state: Dict[str, Any]) -> Dict[str, Any]:
         }
 
     try:
-        honeypot_message = _generate_response(state, persona, conversation_history)
+        honeypot_message = await _generate_response(state, persona, conversation_history)
 
         from utils.logger import AgentLogger
         AgentLogger.response_generated(honeypot_message)
@@ -157,7 +164,7 @@ def persona_engagement_agent(state: Dict[str, Any]) -> Dict[str, Any]:
 # PERSONA GENERATION
 # =========================================================
 
-def _generate_unique_persona(state: Dict[str, Any]) -> Dict:
+async def _generate_unique_persona(state: Dict[str, Any]) -> Dict:
 
     message = state.get("original_message", "")
     scam_type = state.get("scam_type", "Unknown")
@@ -175,7 +182,7 @@ def _generate_unique_persona(state: Dict[str, Any]) -> Dict:
     )
 
     try:
-        response_text = call_llm(
+        response_text = await call_llm_async(
             prompt=prompt,
             system_instruction="Generate fictional character profile.",
             json_mode=True,
@@ -217,15 +224,17 @@ def _generate_unique_persona(state: Dict[str, Any]) -> Dict:
 # RESPONSE GENERATION (ORDER-PRESERVING CONTEXT)
 # =========================================================
 
-def _generate_response(state: Dict[str, Any], persona: Dict, history: List) -> str:
+async def _generate_response(state: Dict[str, Any], persona: Dict, history: List) -> str:
 
-    # 1. Get last 6 turns preserving chronological order
+    # 1. Get last 6 turns preserving chronological order (sanitized)
     recent_history = history[-6:]
 
     context_lines = []
     for turn in recent_history:
         role_label = "SCAMMER" if turn["role"] == "scammer" else "YOU"
-        context_lines.append(f"{role_label}: {turn['message']}")
+        # Sanitize message to prevent prompt injection
+        sanitized_msg = turn['message'].replace('{', '').replace('}', '')[:300]
+        context_lines.append(f"{role_label}: {sanitized_msg}")
 
     chat_context = "\n".join(context_lines) if context_lines else "No previous conversation."
 
@@ -242,7 +251,7 @@ def _generate_response(state: Dict[str, Any], persona: Dict, history: List) -> s
     )
 
     # 2. Force model to respond to last message only
-    return call_llm(
+    return await call_llm_async(
         prompt=prompt,
         system_instruction="You are a real human victim. Reply directly to the very last message in the context.",
         agent_name="response",

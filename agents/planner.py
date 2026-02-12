@@ -14,7 +14,7 @@ Enhancements:
 import json
 import logging
 from typing import Dict, Any, Tuple
-from utils.llm_client import call_llm
+from utils.llm_client import call_llm_async
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,7 @@ Respond with JSON ONLY:
 }}"""
 
 
-def planner_agent(state: Dict[str, Any]) -> Dict[str, Any]:
+async def planner_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     logger.info("Planner Agent: Analyzing strategy...")
 
     from config import get_settings
@@ -149,7 +149,7 @@ def planner_agent(state: Dict[str, Any]) -> Dict[str, Any]:
                            bank_list, upi_list, url_list)
 
     try:
-        response_text = call_llm(
+        response_text = await call_llm_async(
             prompt=prompt,
             system_instruction="You are a strategic AI planner.",
             json_mode=True,
@@ -262,22 +262,27 @@ def _determine_verdict(state: Dict,
 
 def _check_smart_exit(high_value: int, total: int, turns: int, max_turns: int, distinct_types: int) -> Tuple[bool, str]:
     """
-    Refined Diversity-Aware Exit Strategy:
-    - Turn 0:    >=3 high-value AND >=2 distinct types
-    - Turn 1-2:  >=3 high-value
-    - Turn 3-4:  >=3 high-value OR (>=2 high-value AND >=2 distinct types)
-    - Turn 5-6:  >=2 high-value
-    - Turn 7-9:  >=1 high-value
+    Improved Exit Strategy - Prevents premature exits:
+    - Turn 0:    NEVER exit (prevent premature termination)
+    - Turn 1-2:  >=4 high-value AND >=2 distinct types (higher threshold)
+    - Turn 3-4:  >=3 high-value AND >=2 distinct types
+    - Turn 5-6:  >=3 high-value OR (>=2 high-value AND >=2 distinct types)
+    - Turn 7-9:  >=2 high-value
     - Turn 10+:  Force exit
     """
     if turns >= 10:
         return True, f"Max turns reached ({turns}). Forced exit."
     
+    # NEVER exit on turn 0 - prevent premature termination
     if turns == 0:
-        if high_value >= 3 and distinct_types >= 2:
-            return True, f"T0: High-density/diversity yield ({high_value} entities, {distinct_types} types)."
+        return False, "Turn 0: Continue engagement"
+    
+    # Higher thresholds for early turns
     elif 1 <= turns <= 2:
-        if high_value >= 3:
+        if high_value >= 4 and distinct_types >= 2:
+            return True, f"T{turns}: High-quality yield ({high_value} entities, {distinct_types} types)."
+    elif 3 <= turns <= 4:
+        if high_value >= 3 and distinct_types >= 2:
             return True, f"T{turns}: High-yield lead ({high_value} entities)."
     elif 3 <= turns <= 4:
         if high_value >= 3 or (high_value >= 2 and distinct_types >= 2):
