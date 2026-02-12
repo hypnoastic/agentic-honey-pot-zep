@@ -67,8 +67,15 @@ async def log_404_headers(request: Request, call_next):
     """Debug middleware to log headers for failed requests."""
     response = await call_next(request)
     if response.status_code == 404 and "ws" in request.url.path:
-        logger.error(f"404 for {request.url.path}")
-        logger.error(f"Headers: {dict(request.headers)}")
+        logger.error(f"--- 404 DEBUG START ---")
+        logger.error(f"Path: {request.url.path}")
+        logger.error(f"Scope Type: {request.scope.get('type')}")
+        logger.error(f"X-Nginx-Match: {request.headers.get('x-nginx-match')}")
+        logger.error(f"X-Debug-Input-Upgrade: {request.headers.get('x-debug-input-upgrade')}")
+        logger.error(f"Connection: {request.headers.get('connection')}")
+        logger.error(f"Upgrade: {request.headers.get('upgrade')}")
+        logger.error(f"All Headers: {dict(request.headers)}")
+        logger.error(f"--- 404 DEBUG END ---")
     return response
 
 from fastapi.exceptions import RequestValidationError
