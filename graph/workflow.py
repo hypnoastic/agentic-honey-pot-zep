@@ -123,12 +123,16 @@ async def _parallel_intake_node(state: HoneypotState) -> Dict[str, Any]:
     """Parallel Assessment and Extraction."""
     async def run_assessment():
         # Pre-filter is sync but we call it here
-        from utils.prefilter import prefilter_scam_detection
+        from utils.prefilter import prefilter_scam_detection, extract_entities_deterministic
         message = state.get("original_message", "")
+        # Run detailed regex extraction first
+        regex_entities = extract_entities_deterministic(message)
+        
         is_obvious, scam_type, confidence, indicators = prefilter_scam_detection(message)
         
         pre_res = {
-            "prefilter_result": {"is_obvious": is_obvious, "scam_type": scam_type, "confidence": confidence, "indicators": indicators}
+            "prefilter_result": {"is_obvious": is_obvious, "scam_type": scam_type, "confidence": confidence, "indicators": indicators},
+            "extracted_entities": regex_entities  # Merge base entities
         }
         
         if is_obvious:
@@ -351,8 +355,23 @@ async def run_honeypot_workflow(
         
         # 4. Failure Event Logging
         try:
-            entity_count = len(final_state.get("extracted_entities", {}).get("bank_accounts", []))
-            if final_state.get("engagement_count", 0) >= 3 and entity_count == 0:
+            entities = final_state.get("extracted_entities", {})
+            # Count all high-value entities, not just bank accounts
+            total_extracted = (
+                len(entities.get("bank_accounts", [])) + 
+                len(entities.get("upi_ids", [])) + 
+                len(entities.get("phishing_urls", [])) +
+                len(entities.get("phone_numbers", []))
+            )
+            
+            # Only log failure if:
+            # 1. Long engagement (>= 3 turns)
+            # 2. No entities extracted
+            # 3. No callback was sent (success override)
+            if (final_state.get("engagement_count", 0) >= 3 
+                and total_extracted == 0 
+                and not final_state.get("callback_sent", False)):
+                
                 from memory.postgres_memory import add_failure_event
                 await add_failure_event(conversation_id, dict(final_state))
         except Exception as e:
@@ -374,7 +393,7 @@ async def run_honeypot_workflow(
             state=final_state,
             is_final=is_final,
             conn=txn_conn,
-            background_embedding=True  # Non-blocking embedding
+            background_embedding=False  # Blocking to ensure intelligence event is recorded
         )
         
         # 6. Final Return
