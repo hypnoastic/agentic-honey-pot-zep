@@ -187,7 +187,9 @@ async def analyze_message(
         
         # Use AgentLogger for colored input
         from utils.logger import AgentLogger
-        AgentLogger._print_colored(f"{request_id}", "orange", "ANALYZING MESSAGE BODY", message)
+        # Passing dummy icon "📥" (ignored by logger) to correctly map title and details
+        # Merging message into title to ensure the whole line is colored orange
+        AgentLogger._print_colored(f"{request_id}", "orange", "📥", f"ANALYZING MESSAGE BODY: {message}")
         
         # 3. Extract conversation history for multi-turn support (Section 6.2)
         conversation_history = []

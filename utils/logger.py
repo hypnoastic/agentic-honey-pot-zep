@@ -81,7 +81,7 @@ class AgentLogger:
         COLORS = {
             'red': "\033[91m", 'green': "\033[92m", 'yellow': "\033[93m",
             'blue': "\033[94m", 'purple': "\033[95m", 'cyan': "\033[96m", 'white': "\033[97m",
-            'bold_red': "\033[1;91m", 'magenta': "\033[35m"
+            'bold_red': "\033[1;91m", 'magenta': "\033[35m", 'orange': "\033[38;5;208m"
         }
         
         

@@ -75,10 +75,10 @@ async def send_guvi_callback(
     
     from utils.logger import AgentLogger
     
-    AgentLogger._print_colored("GUVI", "purple", "Sending Report", f"URL: {callback_url}")
+    AgentLogger._print_colored("GUVI", "purple", "📞", f"Sending Report: URL: {callback_url}")
     # Log payload as debug unless it's small, or just print it cleanly
     # logger.debug(json.dumps(payload, indent=2))
-    print(f"\033[96m{json.dumps(payload, indent=2)}\033[0m") # Print payload in cyan directly for visibility per user request
+    print(f"\033[95m{json.dumps(payload, indent=2)}\033[0m") # Print payload in purple directly for visibility per user request
     
     try:
         async with httpx.AsyncClient(timeout=CALLBACK_TIMEOUT) as client:
@@ -89,10 +89,10 @@ async def send_guvi_callback(
             )
             
             if response.status_code == 200:
-                AgentLogger._print_colored("GUVI", "green", "✅", "Success", f"Status: {response.status_code}")
+                AgentLogger._print_colored("GUVI", "purple", "✅", f"Success: Status: {response.status_code}")
                 return True
             else:
-                AgentLogger._print_colored("GUVI", "red", "❌", "Failed", f"Status: {response.status_code} | Body: {response.text}")
+                AgentLogger._print_colored("GUVI", "purple", "❌", f"Failed: Status: {response.status_code} | Body: {response.text}")
                 return False
                 
     except httpx.TimeoutException:
