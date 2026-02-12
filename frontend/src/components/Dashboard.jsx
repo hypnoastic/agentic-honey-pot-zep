@@ -162,7 +162,7 @@ export default function Dashboard() {
         {/* Left: Past Detections */}
         <div className="w-1/2 bg-zinc-900 border border-zinc-800 rounded-2xl flex flex-col overflow-hidden relative transition-all duration-300">
           <div className="p-4 border-b border-zinc-800 flex justify-between items-center bg-zinc-900/50 backdrop-blur-sm sticky top-0 z-10 shrink-0">
-            <h2 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
+            <h2 className="text-xl font-bold tracking-tight text-white flex items-center gap-2 font-mono">
               <ShieldAlert className="w-5 h-5 text-green-500 animate-pulse" />
               {selectedDetection ? "Detection Details" : "Past Detections"}
             </h2>
@@ -196,7 +196,7 @@ export default function Dashboard() {
              <div className="p-4 border-b border-zinc-800 bg-zinc-900/30 shrink-0">
                 <h2 className="text-xl font-bold tracking-tight text-white font-mono flex items-center gap-2">
                     <Terminal className="w-5 h-5 text-red-500 animate-pulse" />
-                    Live Terminal
+                    Live Logs
                 </h2>
              </div>
              <div className="flex-1 overflow-y-auto p-4 font-mono text-sm space-y-1 scrollbar-thin scrollbar-thumb-zinc-800 scrollbar-track-transparent bg-black/50">
@@ -243,7 +243,7 @@ function StatsCard({ title, value, sub, color = "text-white" }) {
 
 function DetectionBanner({ data, onClick }) {
     return (
-        <div onClick={onClick} className="p-4 border border-zinc-800 rounded-xl hover:border-zinc-500 hover:bg-zinc-800/30 transition-all cursor-pointer group bg-zinc-900/50">
+        <div onClick={onClick} className="p-4 border border-zinc-800 rounded-xl hover:border-zinc-500 hover:bg-zinc-800/30 transition-all cursor-pointer group bg-zinc-900/50 font-mono text-sm">
             <div className="flex justify-between items-center mb-1">
                 <span className="text-zinc-200 font-bold text-lg group-hover:text-white transition-colors capitalize">{data.scam_type?.replace('_', ' ') || "Unknown Scam"}</span>
                 <span className="text-zinc-500 text-xs font-mono">{new Date(data.timestamp).toLocaleTimeString()}</span>
@@ -262,7 +262,7 @@ function DetectionBanner({ data, onClick }) {
 
 function DetectionDetailView({ data }) {
     return (
-        <div className="space-y-6 animate-in fade-in zoom-in-95 duration-200">
+        <div className="space-y-6 animate-in fade-in zoom-in-95 duration-200 font-mono text-sm">
             <div className="bg-zinc-800/50 p-4 rounded-xl border border-zinc-700">
                 <h3 className="text-2xl font-bold text-white mb-2 uppercase tracking-tight">{data.scam_type}</h3>
                 <p className="text-zinc-300 leading-relaxed">{data.summary}</p>
