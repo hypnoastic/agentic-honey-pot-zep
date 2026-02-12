@@ -1,18 +1,17 @@
 """
-Persona Engagement Agent (Production Grade - Final)
+Persona Engagement Agent (Production Grade - Final - Fixed)
 
-- Gemini Flash Optimized
-- Deterministic + Low Token
-- Extraction-focused (3–4 turns ideal)
-- Hard cap: 10 turns
-- Injects last 6 turns in chronological order
-- Anti-repetition guard
-- One-question-per-turn enforcement
+Fixes:
+- Prevents repeated persona across sessions
+- Injects entropy using conversation_id
+- Higher temperature ONLY for persona generation
+- Engagement remains deterministic
 """
 
 import json
 import random
 import logging
+import uuid
 from typing import Dict, Any, List
 from utils.llm_client import call_llm_async
 from config import get_settings
@@ -23,10 +22,12 @@ logger = logging.getLogger(__name__)
 
 
 # =========================================================
-# PERSONA GENERATION PROMPT (Minimal + Strict)
+# PERSONA GENERATION PROMPT
 # =========================================================
 
 PERSONA_GENERATION_PROMPT = """Create a UNIQUE and uncommon Indian persona.
+
+Entropy Seed: {entropy_seed}
 
 Context: "{message}" ({scam_type})
 Traits Instruction: {traits_instruction}
@@ -37,6 +38,7 @@ RULES:
 - Occupation must be specific
 - Background must be 1 short sentence
 - Keep output minimal
+- NEVER repeat identities from similar prompts
 
 Return JSON ONLY:
 {{
@@ -51,7 +53,7 @@ Return JSON ONLY:
 
 
 # =========================================================
-# ENGAGEMENT PROMPT (Chronological Context Injection)
+# ENGAGEMENT PROMPT (UNCHANGED)
 # =========================================================
 
 ENGAGEMENT_PROMPT = """You are a real human (NOT an AI).
@@ -92,9 +94,6 @@ Respond with natural dialogue only.
 
 async def persona_engagement_agent(state: Dict[str, Any]) -> Dict[str, Any]:
 
-    # -----------------------------
-    # Persona Initialization
-    # -----------------------------
     if not state.get("persona_name"):
         persona = await _generate_unique_persona(state)
         state["persona_name"] = persona["name"]
@@ -106,21 +105,14 @@ async def persona_engagement_agent(state: Dict[str, Any]) -> Dict[str, Any]:
             persona["occupation"],
             "Persona Generated"
         )
-    
-    # Load existing persona (skip LLM if already valid)
+
     persona_context = state.get("persona_context", "{}")
-    if persona_context and persona_context != "{}":
-        persona = json.loads(persona_context)
-    else:
-        # Fallback: generate if somehow missing
-        persona = await _generate_unique_persona(state)
-        state["persona_context"] = json.dumps(persona)
+    persona = json.loads(persona_context)
 
     conversation_history = state.get("conversation_history", [])
     engagement_count = state.get("engagement_count", 0)
     max_engagements = min(10, state.get("max_engagements", settings.max_engagement_turns))
 
-    # Hard cap
     if engagement_count >= max_engagements:
         return {
             "engagement_complete": True,
@@ -133,7 +125,6 @@ async def persona_engagement_agent(state: Dict[str, Any]) -> Dict[str, Any]:
         from utils.logger import AgentLogger
         AgentLogger.response_generated(honeypot_message)
 
-        # Update history
         new_history = list(conversation_history)
         new_history.append({
             "role": "honeypot",
@@ -161,7 +152,7 @@ async def persona_engagement_agent(state: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # =========================================================
-# PERSONA GENERATION
+# PERSONA GENERATION (FIXED)
 # =========================================================
 
 async def _generate_unique_persona(state: Dict[str, Any]) -> Dict:
@@ -169,30 +160,36 @@ async def _generate_unique_persona(state: Dict[str, Any]) -> Dict:
     message = state.get("original_message", "")
     scam_type = state.get("scam_type", "Unknown")
 
+    # 🔥 Controlled entropy using conversation_id
+    conversation_id = state.get("conversation_id", str(uuid.uuid4()))
+    entropy_seed = conversation_id[-8:]  # stable per session
+
     traits = state.get("persona_traits", {})
     if traits:
-        # Filter out identity-specific fields to force unique generation
-        # We only want behavioral traits (e.g., "Anxious", "Skeptical")
-        safe_traits = {k: v for k, v in traits.items() if k not in ["name", "age", "occupation", "context", "voice"]}
-        if safe_traits:
-            traits_instruction = ", ".join([f"{k}: {v}" for k, v in safe_traits.items()])
-        else:
-            traits_instruction = "Choose traits matching scam context. ensure UNIQUE identity."
+        safe_traits = {
+            k: v for k, v in traits.items()
+            if k not in ["name", "age", "occupation", "context", "voice"]
+        }
+        traits_instruction = ", ".join([f"{k}: {v}" for k, v in safe_traits.items()]) \
+            if safe_traits else "Choose traits matching scam context."
     else:
         traits_instruction = "Choose traits matching scam context."
 
     prompt = PERSONA_GENERATION_PROMPT.format(
         message=message,
         scam_type=scam_type,
-        traits_instruction=traits_instruction
+        traits_instruction=traits_instruction,
+        entropy_seed=entropy_seed
     )
 
     try:
+        # 🔥 Higher temperature ONLY for persona
         response_text = await call_llm_async(
             prompt=prompt,
             system_instruction="Generate fictional character profile.",
             json_mode=True,
-            agent_name="persona"
+            agent_name="persona",
+            temperature=0.9  # increased randomness
         )
 
         persona = parse_json_safely(response_text)
@@ -223,27 +220,26 @@ async def _generate_unique_persona(state: Dict[str, Any]) -> Dict:
              "voice": "Direct"}
         ]
 
-        return random.choice(fallbacks)
+        # Deterministic fallback selection based on UUID
+        index = int(uuid.UUID(conversation_id)) % len(fallbacks)
+        return fallbacks[index]
 
 
 # =========================================================
-# RESPONSE GENERATION (ORDER-PRESERVING CONTEXT)
+# RESPONSE GENERATION (UNCHANGED)
 # =========================================================
 
 async def _generate_response(state: Dict[str, Any], persona: Dict, history: List) -> str:
 
-    # 1. Get last 6 turns preserving chronological order (sanitized)
     recent_history = history[-6:]
 
     context_lines = []
     for turn in recent_history:
         role_label = "SCAMMER" if turn["role"] == "scammer" else "YOU"
-        # Sanitize message to prevent prompt injection
         sanitized_msg = turn['message'].replace('{', '').replace('}', '')[:300]
         context_lines.append(f"{role_label}: {sanitized_msg}")
 
     chat_context = "\n".join(context_lines) if context_lines else "No previous conversation."
-
     strategy_hint = state.get("strategy_hint", "Engage naturally and extract details.")
 
     prompt = ENGAGEMENT_PROMPT.format(
@@ -256,7 +252,6 @@ async def _generate_response(state: Dict[str, Any], persona: Dict, history: List
         strategy_hint=strategy_hint
     )
 
-    # 2. Force model to respond to last message only
     return await call_llm_async(
         prompt=prompt,
         system_instruction="You are a real human victim. Reply directly to the very last message in the context.",
