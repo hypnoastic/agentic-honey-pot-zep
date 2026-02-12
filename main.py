@@ -264,11 +264,23 @@ app.include_router(dashboard_router)
 
 # Serve Frontend (React Build)
 frontend_dist = os.path.join(os.path.dirname(__file__), "frontend", "dist")
+
 if os.path.exists(frontend_dist):
+    # Mount assets directory (standard Vite structure)
     app.mount("/assets", StaticFiles(directory=os.path.join(frontend_dist, "assets")), name="assets")
-    
-    @app.get("/")
-    async def serve_dashboard():
+
+    @app.get("/{full_path:path}")
+    async def serve_frontend(full_path: str):
+        # 1. Skip API routes (let them be handled by their routers)
+        if full_path.startswith("api/") or full_path.startswith("docs") or full_path.startswith("openapi.json"):
+             raise HTTPException(status_code=404)
+        
+        # 2. Check if the exact file exists in dist/ (for vite.svg, favicon.ico, etc.)
+        full_file_path = os.path.join(frontend_dist, full_path)
+        if os.path.isfile(full_file_path):
+            return FileResponse(full_file_path)
+        
+        # 3. Fallback to index.html for SPA routing
         return FileResponse(os.path.join(frontend_dist, "index.html"))
 else:
     @app.get("/")
@@ -278,12 +290,6 @@ else:
             "name": "Agentic Honey-Pot API",
             "version": "1.1.0",
             "description": "Multi-agent scam detection and intelligence extraction with Neon PostgreSQL memory",
-            "model_provider": "OpenAI",
-            "features": {
-                "memory": "Persistent conversational memory (PgVector) for multi-turn context",
-                "multi_agent": "LangGraph-orchestrated agent pipeline",
-                "scam_detection": "Advanced LLM-based scam analysis"
-            },
             "endpoints": {
                 "analyze": "POST /analyze - Analyze message for scams",
                 "health": "GET /health - Health check",
