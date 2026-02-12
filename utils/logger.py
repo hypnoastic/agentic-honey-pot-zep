@@ -57,7 +57,20 @@ class AgentLogger:
 
     @staticmethod
     def _print_colored(tag: str, color: str, icon: str, title: str, details: str = ""):
-        """Internal format for colored log messages using standard logger."""
+        """Internal format for colored log messages."""
+        # We manually construct the colored string using colorlog's escape codes
+        # But efficiently, we just use the root logger with a prefix that colorlog could handle if mapped
+        # Simpler approach: Use the 'extra' dict if we had custom formatters, 
+        # but for direct control we can print formatted strings if we want distinct colors per line.
+        
+        # For simplicity in this specialized logger, we will use specific loggers 
+        # that we can map colors to via the `extra` fields or just relying on the text structure.
+        
+        # Let's use a simpler visual format:
+        # [ICON TAG] TITLE: Details
+        
+        # We'll use color codes strictly for the TAG to make it pop.
+        
         RESET = "\033[0m"
         COLORS = {
             'red': "\033[91m", 'green': "\033[92m", 'yellow': "\033[93m",
@@ -72,8 +85,12 @@ class AgentLogger:
         else:
             msg = f"{c}{icon} [{tag}] {title}{RESET}"
             
-        # Use the root logger to ensure synchronization with other logs
-        logging.info(msg)
+        # We print directly to stdout to ensure color preservation across all terminals
+        # independent of the root logger's formatting for these specific agent events.
+        print(msg)
+        
+        # Also log to file/system logger (stripped of color codes for purity if needed, but we keep simple)
+        # logging.info(msg) # Avoid double printing if using StreamHandler
 
     @staticmethod
     def scam_detected(probability: float, reason: str):

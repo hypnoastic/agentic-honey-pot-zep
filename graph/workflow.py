@@ -243,35 +243,16 @@ async def _trigger_guvi_callback_with_retry(state: Dict[str, Any], conversation_
     from config import get_settings
     settings = get_settings()
     
-    # Check if we have sufficient data to trigger callback (log BEFORE URL check)
-    entities = state.get("extracted_entities", {})
-    high_value_count = sum([
-        len(entities.get("upi_ids", [])),
-        len(entities.get("phone_numbers", [])),
-        len(entities.get("bank_accounts", [])),
-        len(entities.get("phishing_urls", []))
-    ])
-    
-    extraction_complete = state.get("extraction_complete", False)
-    engagement_complete = state.get("engagement_complete", False)
-    
-    # Log callback decision details
-    logger.info(f"🎯 GUVI CALLBACK CHECK: entities={high_value_count} (UPI={len(entities.get('upi_ids', []))}, Phone={len(entities.get('phone_numbers', []))}, Account={len(entities.get('bank_accounts', []))}, URL={len(entities.get('phishing_urls', []))}), extraction_complete={extraction_complete}, engagement_complete={engagement_complete}")
-    
     if not settings.guvi_callback_url:
         logger.warning("⚠️  GUVI callback skipped: No callback URL configured (set GUVI_CALLBACK_URL in .env)")
-        return
+        return False
     
-    # Only trigger if we have completion flags OR sufficient high-value entities (2+)
-    if not (extraction_complete or engagement_complete or high_value_count >= 2):
-        logger.info(f"GUVI callback skipped: Insufficient data threshold not met")
-        return
-    
-    logger.info(f"✅ Triggering GUVI callback: Sufficient data collected!")
+    logger.info(f"✅ Executing GUVI callback for judged scam...")
     
     # Use the proper GUVI callback function with correct payload format
     from utils.guvi_callback import send_guvi_callback, build_agent_notes
     
+    entities = state.get("extracted_entities", {})
     notes = build_agent_notes(
         scam_type=state.get("scam_type"),
         behavioral_signals=state.get("behavioral_signals", []),
@@ -290,7 +271,7 @@ async def _trigger_guvi_callback_with_retry(state: Dict[str, Any], conversation_
             )
             if success:
                 logger.info(f"✅ GUVI callback successful for {conversation_id}")
-                return
+                return True
             else:
                 logger.warning(f"GUVI callback attempt {attempt + 1} returned failure")
         except Exception as e:
@@ -362,8 +343,11 @@ async def run_honeypot_workflow(
         except Exception as e:
             logger.warning(f"Failed to log failure event: {e}")
         
-        # 5. Callback with retry
-        await _trigger_guvi_callback_with_retry(final_state, conversation_id)
+        # 5. Callback with retry - ONLY if planner explicitly decided to judge and not already sent
+        if final_state.get("planner_action") == "judge" and final_state.get("judge_verdict") == "GUILTY" and not final_state.get("callback_sent", False):
+            if await _trigger_guvi_callback_with_retry(final_state, conversation_id):
+                final_state["callback_sent"] = True
+    
         
         # 6. Database Persistence (Neon) - Intelligence embedding in background
         from memory.postgres_memory import persist_conversation_memory

@@ -73,6 +73,32 @@ async def test_guvi_callback():
     print(f"  Total Entities: {total2}")
     print(f"  Entities: {json.dumps(entities2, indent=2)}")
     
+    # Turn 3: Stall/Resist
+    print("\n" + "-" * 70)
+    print("Turn 3: Scammer pressures, user resists")
+    print("-" * 70)
+    
+    result3 = await run_honeypot_workflow(
+        message="Stop wasting my time! Send OTP now or your account is GONE forever! This is a official warning.",
+        conversation_id=conversation_id,
+        max_engagements=10
+    )
+    print(f"  Decision: {result3.get('planner_action', 'N/A')}")
+    
+    # Turn 4: Final Pressure (likely to trigger judge if threshold reached)
+    print("\n" + "-" * 70)
+    print("Turn 4: Final Pressure / Judgment")
+    print("-" * 70)
+    
+    result4 = await run_honeypot_workflow(
+        message="I don't have OTP. Why you need it? Why are you shouting?",
+        # We send a "user" response that might make the planner give up or judge
+        conversation_id=conversation_id,
+        max_engagements=10
+    )
+    print(f"  Decision: {result4.get('planner_action', 'N/A')}")
+    print(f"  Verdict: {result4.get('judge_verdict', 'N/A')}")
+
     # Verification
     print("\n" + "=" * 70)
     print("RESULTS")
