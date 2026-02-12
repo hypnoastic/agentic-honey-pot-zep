@@ -7,7 +7,15 @@ import asyncio
 import sys
 import json
 import uuid
+import logging
 sys.path.insert(0, '.')
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 async def test_guvi_callback():
     print("=" * 70)

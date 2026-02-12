@@ -40,8 +40,6 @@ def create_honeypot_workflow() -> StateGraph:
     workflow.add_node("parallel_intake", _parallel_intake_node)
     workflow.add_node("planner", _planner_node)
     workflow.add_node("persona_engagement", _persona_engagement_node)
-    workflow.add_node("intelligence_extraction", _intelligence_extraction_node)
-    workflow.add_node("regex_extractor", _regex_extractor_node)
     workflow.add_node("response_formatter", _response_formatter_node)
     
     # Set entry point
@@ -62,14 +60,12 @@ def create_honeypot_workflow() -> StateGraph:
         _route_from_planner,
         {
             "engage": "persona_engagement",
-            "judge": "intelligence_extraction",
             "end": "response_formatter"
         }
     )
     
-    workflow.add_edge("persona_engagement", "regex_extractor")
-    workflow.add_edge("regex_extractor", "response_formatter")
-    workflow.add_edge("intelligence_extraction", "response_formatter")
+    workflow.add_edge("persona_engagement", "response_formatter")
+    workflow.add_edge("intelligent_extraction", "response_formatter")
     workflow.add_edge("response_formatter", END)
     
     return workflow.compile()
@@ -111,13 +107,6 @@ async def _planner_node(state: HoneypotState) -> Dict[str, Any]:
 async def _persona_engagement_node(state: HoneypotState) -> Dict[str, Any]:
     return await persona_engagement_agent(dict(state))
 
-async def _intelligence_extraction_node(state: HoneypotState) -> Dict[str, Any]:
-    return await intelligence_extraction_agent(dict(state))
-
-async def _regex_extractor_node(state: HoneypotState) -> Dict[str, Any]:
-    from agents.intelligence_extraction import regex_only_extraction_agent
-    return regex_only_extraction_agent(dict(state))
-
 async def _response_formatter_node(state: HoneypotState) -> Dict[str, Any]:
     return await response_formatter_agent(dict(state))
 
@@ -129,14 +118,12 @@ async def _parallel_intake_node(state: HoneypotState) -> Dict[str, Any]:
     """Parallel Assessment and Extraction."""
     async def run_assessment():
         # Pre-filter is sync but we call it here
-        from utils.prefilter import prefilter_scam_detection, extract_entities_deterministic
+        from utils.prefilter import prefilter_scam_detection
         message = state.get("original_message", "")
         is_obvious, scam_type, confidence, indicators = prefilter_scam_detection(message)
-        regex_entities = extract_entities_deterministic(message)
         
         pre_res = {
-            "prefilter_result": {"is_obvious": is_obvious, "scam_type": scam_type, "confidence": confidence, "indicators": indicators},
-            "prefilter_entities": regex_entities
+            "prefilter_result": {"is_obvious": is_obvious, "scam_type": scam_type, "confidence": confidence, "indicators": indicators}
         }
         
         if is_obvious:
@@ -168,11 +155,12 @@ async def _parallel_intake_node(state: HoneypotState) -> Dict[str, Any]:
         "upi": len(entities.get("upi_ids", [])),
         "phone": len(entities.get("phone_numbers", [])),
         "account": len(entities.get("bank_accounts", [])),
-        "url": len(entities.get("urls", []))
+        "url": len(entities.get("phishing_urls", [])),
+        "ifsc": len(entities.get("ifsc_codes", []))
     }
     total_entities = sum(entity_counts.values())
     if total_entities > 0:
-        logger.info(f"📊 ENTITIES EXTRACTED: UPI={entity_counts['upi']}, Phone={entity_counts['phone']}, Account={entity_counts['account']}, URL={entity_counts['url']} | Total={total_entities}")
+        logger.info(f"📊 ENTITIES EXTRACTED: UPI={entity_counts['upi']}, Phone={entity_counts['phone']}, Account={entity_counts['account']}, URL={entity_counts['url']}, IFSC={entity_counts['ifsc']} | Total={total_entities}")
     
     # Authoritative Force for entities
     high_value = len(entities.get("bank_accounts", [])) + len(entities.get("upi_ids", [])) + len(entities.get("phishing_urls", []))
@@ -252,8 +240,7 @@ async def _load_system_memory(conversation_id: str, message: str, txn_conn: Any)
 # ============================================================================
 
 async def _trigger_guvi_callback_with_retry(state: Dict[str, Any], conversation_id: str, max_retries: int = 3):
-    """Trigger GUVI callback with exponential backoff retry."""
-    import httpx
+    """Trigger GUVI callback with proper payload format and retry logic."""
     from config import get_settings
     settings = get_settings()
     
@@ -263,14 +250,14 @@ async def _trigger_guvi_callback_with_retry(state: Dict[str, Any], conversation_
         len(entities.get("upi_ids", [])),
         len(entities.get("phone_numbers", [])),
         len(entities.get("bank_accounts", [])),
-        len(entities.get("urls", []))
+        len(entities.get("phishing_urls", []))
     ])
     
     extraction_complete = state.get("extraction_complete", False)
     engagement_complete = state.get("engagement_complete", False)
     
     # Log callback decision details
-    logger.info(f"🎯 GUVI CALLBACK CHECK: entities={high_value_count} (UPI={len(entities.get('upi_ids', []))}, Phone={len(entities.get('phone_numbers', []))}, Account={len(entities.get('bank_accounts', []))}, URL={len(entities.get('urls', []))}), extraction_complete={extraction_complete}, engagement_complete={engagement_complete}")
+    logger.info(f"🎯 GUVI CALLBACK CHECK: entities={high_value_count} (UPI={len(entities.get('upi_ids', []))}, Phone={len(entities.get('phone_numbers', []))}, Account={len(entities.get('bank_accounts', []))}, URL={len(entities.get('phishing_urls', []))}), extraction_complete={extraction_complete}, engagement_complete={engagement_complete}")
     
     if not settings.guvi_callback_url:
         logger.warning("⚠️  GUVI callback skipped: No callback URL configured (set GUVI_CALLBACK_URL in .env)")
@@ -283,50 +270,38 @@ async def _trigger_guvi_callback_with_retry(state: Dict[str, Any], conversation_
     
     logger.info(f"✅ Triggering GUVI callback: Sufficient data collected!")
     
-    payload = state.get("final_response", {})
+    # Use the proper GUVI callback function with correct payload format
+    from utils.guvi_callback import send_guvi_callback, build_agent_notes
+    
+    notes = build_agent_notes(
+        scam_type=state.get("scam_type"),
+        behavioral_signals=state.get("behavioral_signals", []),
+        conversation_summary=state.get("conversation_summary", "")
+    )
     
     for attempt in range(max_retries):
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.post(
-                    settings.guvi_callback_url,
-                    json=payload,
-                    headers={"Content-Type": "application/json"}
-                )
-                if response.status_code == 200:
-                    logger.info(f"GUVI callback successful for {conversation_id}")
-                    return
-                else:
-                    logger.warning(f"GUVI callback returned {response.status_code}")
+            success = await send_guvi_callback(
+                session_id=conversation_id,
+                scam_detected=state.get("scam_detected", True),
+                total_messages=len(state.get("conversation_history", [])) + state.get("engagement_count", 0) + 1,
+                extracted_intelligence=entities,
+                agent_notes=notes,
+                scam_indicators=state.get("scam_indicators", []) + state.get("behavioral_signals", [])
+            )
+            if success:
+                logger.info(f"✅ GUVI callback successful for {conversation_id}")
+                return
+            else:
+                logger.warning(f"GUVI callback attempt {attempt + 1} returned failure")
         except Exception as e:
-            wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+            wait_time = 2 ** attempt
             logger.warning(f"GUVI callback attempt {attempt + 1} failed: {e}. Retrying in {wait_time}s...")
             if attempt < max_retries - 1:
                 await asyncio.sleep(wait_time)
     
     logger.error(f"GUVI callback failed after {max_retries} attempts for {conversation_id}")
 
-async def _trigger_guvi_callback_safe(state: Dict[str, Any], conversation_id: str):
-    try:
-        if state.get("scam_detected") and (state.get("engagement_complete") or state.get("extraction_complete")):
-            from utils.guvi_callback import send_guvi_callback, build_agent_notes
-            
-            notes = build_agent_notes(
-                scam_type=state.get("scam_type"),
-                behavioral_signals=state.get("behavioral_signals", []),
-                conversation_summary=state.get("conversation_summary", "")
-            )
-            
-            await send_guvi_callback(
-                session_id=conversation_id,
-                scam_detected=True,
-                total_messages=len(state.get("conversation_history", [])) + state.get("engagement_count", 0) + 1,
-                extracted_intelligence=state.get("extracted_entities", {}),
-                agent_notes=notes,
-                scam_indicators=state.get("scam_indicators", []) + state.get("behavioral_signals", [])
-            )
-    except Exception as e:
-        logger.warning(f"GUVI callback orchestration failed: {e}")
 
 # ============================================================================
 # MAIN WORKFLOW RUNNER

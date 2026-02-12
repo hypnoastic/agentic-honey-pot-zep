@@ -42,17 +42,23 @@ async def send_guvi_callback(
     Returns:
         True if callback succeeded, False otherwise
     """
+    # Helper to flatten entities (since they might be stored as {"value": "..."} dicts)
+    def flatten(items):
+        if not isinstance(items, list):
+            return []
+        return [item.get("value", str(item)) if isinstance(item, dict) else str(item) for item in items]
+
     # Build payload per Section 12 specification
     payload = {
         "sessionId": session_id,
         "scamDetected": scam_detected,
         "totalMessagesExchanged": total_messages,
         "extractedIntelligence": {
-            "bankAccounts": extracted_intelligence.get("bank_accounts", []),
-            "upiIds": extracted_intelligence.get("upi_ids", []),
-            "phishingLinks": extracted_intelligence.get("phishing_urls", []),
-            "phoneNumbers": extracted_intelligence.get("phone_numbers", []),
-            "suspiciousKeywords": scam_indicators or extracted_intelligence.get("keywords", [])
+            "bankAccounts": flatten(extracted_intelligence.get("bank_accounts", [])),
+            "upiIds": flatten(extracted_intelligence.get("upi_ids", [])),
+            "phishingLinks": flatten(extracted_intelligence.get("phishing_urls", [])),
+            "phoneNumbers": flatten(extracted_intelligence.get("phone_numbers", [])),
+            "suspiciousKeywords": scam_indicators or flatten(extracted_intelligence.get("keywords", []))
         },
         "agentNotes": agent_notes
     }
@@ -95,7 +101,7 @@ async def send_guvi_callback(
                 return False
                 
     except httpx.TimeoutException:
-        logger.error(f"[GUVI CALLBACK] ⏱️ TIMEOUT - Failed to reach {GUVI_CALLBACK_URL}")
+        logger.error(f"[GUVI CALLBACK] ⏱️ TIMEOUT - Failed to reach {callback_url}")
         return False
     except Exception as e:
         logger.error(f"[GUVI CALLBACK] ❌ ERROR - {type(e).__name__}: {e}")
