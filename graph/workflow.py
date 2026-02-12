@@ -246,11 +246,7 @@ async def _trigger_guvi_callback_with_retry(state: Dict[str, Any], conversation_
     from config import get_settings
     settings = get_settings()
     
-    if not settings.guvi_callback_url:
-        logger.info("GUVI callback skipped: No callback URL configured")
-        return
-    
-    # Check if we have sufficient data to trigger callback
+    # Check if we have sufficient data to trigger callback (log BEFORE URL check)
     entities = state.get("extracted_entities", {})
     high_value_count = sum([
         len(entities.get("upi_ids", [])),
@@ -262,12 +258,19 @@ async def _trigger_guvi_callback_with_retry(state: Dict[str, Any], conversation_
     extraction_complete = state.get("extraction_complete", False)
     engagement_complete = state.get("engagement_complete", False)
     
-    # Only trigger if we have completion flags OR sufficient high-value entities (2+)
-    if not (extraction_complete or engagement_complete or high_value_count >= 2):
-        logger.info(f"GUVI callback skipped: Insufficient data (high_value_entities={high_value_count}, extraction_complete={extraction_complete}, engagement_complete={engagement_complete})")
+    # Log callback decision details
+    logger.info(f"🎯 GUVI CALLBACK CHECK: entities={high_value_count} (UPI={len(entities.get('upi_ids', []))}, Phone={len(entities.get('phone_numbers', []))}, Account={len(entities.get('bank_accounts', []))}, URL={len(entities.get('urls', []))}), extraction_complete={extraction_complete}, engagement_complete={engagement_complete}")
+    
+    if not settings.guvi_callback_url:
+        logger.warning("⚠️  GUVI callback skipped: No callback URL configured (set GUVI_CALLBACK_URL in .env)")
         return
     
-    logger.info(f"🎯 Triggering GUVI callback: high_value_entities={high_value_count}, extraction_complete={extraction_complete}, engagement_complete={engagement_complete}")
+    # Only trigger if we have completion flags OR sufficient high-value entities (2+)
+    if not (extraction_complete or engagement_complete or high_value_count >= 2):
+        logger.info(f"GUVI callback skipped: Insufficient data threshold not met")
+        return
+    
+    logger.info(f"✅ Triggering GUVI callback: Sufficient data collected!")
     
     payload = state.get("final_response", {})
     
