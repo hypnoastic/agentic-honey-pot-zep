@@ -6,10 +6,11 @@ Mandatory callback to report extracted intelligence for evaluation (Section 12).
 import httpx
 import logging
 from typing import Dict, Any, List, Optional
+from config import get_settings
 
 logger = logging.getLogger(__name__)
 
-GUVI_CALLBACK_URL = "https://hackathon.guvi.in/api/updateHoneyPotFinalResult"
+# GUVI_CALLBACK_URL = "https://hackathon.guvi.in/api/updateHoneyPotFinalResult" # Removed hardcoded URL
 CALLBACK_TIMEOUT = 10  # seconds
 
 
@@ -58,9 +59,17 @@ async def send_guvi_callback(
     
     # Log full payload for debugging
     import json
+    
+    # Get URL from .env with fallback to hardcoded URL
+    settings = get_settings()
+    callback_url = settings.guvi_callback_url or "https://hackathon.guvi.in/api/updateHoneyPotFinalResult"
+    
+    if not settings.guvi_callback_url:
+        logger.warning("GUVI_CALLBACK_URL not set in .env, using fallback URL")
+    
     logger.info("=" * 60)
     logger.info("[GUVI CALLBACK] SENDING FINAL RESULT TO HACKATHON ENDPOINT")
-    logger.info(f"[GUVI CALLBACK] URL: {GUVI_CALLBACK_URL}")
+    logger.info(f"[GUVI CALLBACK] URL: {callback_url}")
     logger.info(f"[GUVI CALLBACK] Session ID: {session_id}")
     logger.info(f"[GUVI CALLBACK] Scam Detected: {scam_detected}")
     logger.info(f"[GUVI CALLBACK] Total Messages: {total_messages}")
@@ -71,7 +80,7 @@ async def send_guvi_callback(
     try:
         async with httpx.AsyncClient(timeout=CALLBACK_TIMEOUT) as client:
             response = await client.post(
-                GUVI_CALLBACK_URL,
+                callback_url,
                 json=payload,
                 headers={"Content-Type": "application/json"}
             )

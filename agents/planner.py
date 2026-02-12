@@ -178,6 +178,9 @@ async def planner_agent(state: Dict[str, Any]) -> Dict[str, Any]:
         "strategy_hint": strategy_hint,
         "current_agent": "planner"
     }
+    
+    # Log planner decision for visibility
+    logger.info(f"🎯 PLANNER DECISION: action={action}, strategy={strategy_hint[:80]}...")
 
     # -------------------------------------------------------------------------
     # VERDICT AUTHORITY HARDENING

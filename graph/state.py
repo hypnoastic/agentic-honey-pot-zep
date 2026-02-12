@@ -134,11 +134,13 @@ def create_initial_state(
         max_engagements=max_engagements,
         engagement_complete=memory.get("engagement_complete", False),
         
-        # Extraction (merge with prior entities)
+        # Extraction (merge with prior entities - include ALL entity types)
         extracted_entities={
             "bank_accounts": prior_entities.get("bank_accounts", []),
             "upi_ids": prior_entities.get("upi_ids", []),
-            "phishing_urls": prior_entities.get("phishing_urls", [])
+            "phishing_urls": prior_entities.get("phishing_urls", []),
+            "phone_numbers": prior_entities.get("phone_numbers", []),
+            "ifsc_codes": prior_entities.get("ifsc_codes", [])
         },
         extraction_complete=False,
         

@@ -13,15 +13,18 @@ Security Guarantees:
 
 import re
 import logging
+import json
 from typing import Dict, Any, List
 
 from config import get_settings
 from utils.parsing import parse_json_safely
 from utils.prefilter import (
     extract_entities_deterministic,
-    merge_entities,
+    merge_entities, # This import will be replaced or supplemented
     filter_low_confidence,
 )
+from agents.entity_utils import merge_entities # Added this line
+from utils.llm_client import call_llm_async # Moved this to top-level
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -173,18 +176,35 @@ async def intelligence_extraction_agent(state: Dict[str, Any]) -> Dict[str, Any]
     )
 
     # -------------------------------------------------------------------------
-    # STEP 4: Safe Incremental Merge into Global State
+    # STEP 4: Incremental Merge with Prior Entities
+    # -------------------------------------------------------------------------
+    # state["extracted_entities"] already contains prior entities loaded from
+    # memory by create_initial_state(). We merge NEW extractions into them.
     # -------------------------------------------------------------------------
 
     existing_entities = state.get("extracted_entities", {}) or {}
-    final_entities = _safe_confidence_merge(
-        existing_entities, combined_new_entities
-    )
+    
+    # Merge: existing (from prior turns via memory) + new extractions
+    final_entities = merge_entities(existing_entities, combined_new_entities)
+    
+    # Schema enforcement
+    final_entities = _enforce_schema(final_entities)
+    
+    logger.info(f"📊 ENTITY MERGE: prior={_count_entities(existing_entities)}, new={_count_entities(combined_new_entities)}, final={_count_entities(final_entities)}")
 
     return {
         "extracted_entities": final_entities,
-        "current_agent": "planner",
+        "current_agent": "intelligence_extraction"
     }
+
+
+def _count_entities(entities: Dict) -> int:
+    """Count total entities across all types."""
+    total = 0
+    for v in entities.values():
+        if isinstance(v, list):
+            total += len(v)
+    return total
 
 
 # =============================================================================

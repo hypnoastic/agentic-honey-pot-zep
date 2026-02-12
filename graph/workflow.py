@@ -162,8 +162,19 @@ async def _parallel_intake_node(state: HoneypotState) -> Dict[str, Any]:
     # Merged deltas
     merged_delta = {**assessment_res, **extraction_res}
     
-    # Authoritative Force for entities
+    # Log extracted entities for visibility
     entities = merged_delta.get("extracted_entities", {})
+    entity_counts = {
+        "upi": len(entities.get("upi_ids", [])),
+        "phone": len(entities.get("phone_numbers", [])),
+        "account": len(entities.get("bank_accounts", [])),
+        "url": len(entities.get("urls", []))
+    }
+    total_entities = sum(entity_counts.values())
+    if total_entities > 0:
+        logger.info(f"📊 ENTITIES EXTRACTED: UPI={entity_counts['upi']}, Phone={entity_counts['phone']}, Account={entity_counts['account']}, URL={entity_counts['url']} | Total={total_entities}")
+    
+    # Authoritative Force for entities
     high_value = len(entities.get("bank_accounts", [])) + len(entities.get("upi_ids", [])) + len(entities.get("phishing_urls", []))
     
     if high_value > 0:
