@@ -262,6 +262,31 @@ import os
 
 app.include_router(dashboard_router)
 
+# --- WebSocket Fix for Deployment ---
+# Sometimes APIRouter prefixes don't play nice with WebSockets behind proxies.
+# We explicitly register the route here to guarantee it exists at the correct path.
+from fastapi import WebSocket, WebSocketDisconnect
+from utils.logger import AgentLogger
+import asyncio
+
+@app.websocket("/api/ws/logs")
+async def websocket_logs_root(websocket: WebSocket):
+    """Stream live logs to dashboard (Root Override)."""
+    await websocket.accept()
+    queue = asyncio.Queue()
+    AgentLogger.register_queue(queue)
+    
+    try:
+        while True:
+            # Wait for log entry
+            data = await queue.get()
+            await websocket.send_json(data)
+    except WebSocketDisconnect:
+        AgentLogger.remove_queue(queue)
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
+        AgentLogger.remove_queue(queue)
+
 # Serve Frontend (React Build)
 frontend_dist = os.path.join(os.path.dirname(__file__), "frontend", "dist")
 
