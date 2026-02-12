@@ -247,7 +247,27 @@ async def _trigger_guvi_callback_with_retry(state: Dict[str, Any], conversation_
     settings = get_settings()
     
     if not settings.guvi_callback_url:
+        logger.info("GUVI callback skipped: No callback URL configured")
         return
+    
+    # Check if we have sufficient data to trigger callback
+    entities = state.get("extracted_entities", {})
+    high_value_count = sum([
+        len(entities.get("upi_ids", [])),
+        len(entities.get("phone_numbers", [])),
+        len(entities.get("bank_accounts", [])),
+        len(entities.get("urls", []))
+    ])
+    
+    extraction_complete = state.get("extraction_complete", False)
+    engagement_complete = state.get("engagement_complete", False)
+    
+    # Only trigger if we have completion flags OR sufficient high-value entities (2+)
+    if not (extraction_complete or engagement_complete or high_value_count >= 2):
+        logger.info(f"GUVI callback skipped: Insufficient data (high_value_entities={high_value_count}, extraction_complete={extraction_complete}, engagement_complete={engagement_complete})")
+        return
+    
+    logger.info(f"🎯 Triggering GUVI callback: high_value_entities={high_value_count}, extraction_complete={extraction_complete}, engagement_complete={engagement_complete}")
     
     payload = state.get("final_response", {})
     
@@ -329,6 +349,12 @@ async def run_honeypot_workflow(
             conversation_id=conversation_id,
             memory_context=memory_context
         )
+        
+        # Load persona from memory if exists (fixes persona changing every turn)
+        if memory_context.get("persona_name"):
+            initial_state["persona_name"] = memory_context["persona_name"]
+            initial_state["persona_context"] = memory_context.get("persona_context", "{}")
+            logger.info(f"Loaded existing persona: {memory_context['persona_name']}")
         
         if initial_history:
             initial_state["conversation_history"] = initial_history
