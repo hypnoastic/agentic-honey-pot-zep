@@ -32,7 +32,7 @@ class AgentLogger:
     _configured = False
     
     @classmethod
-    def configure(cls):
+    def configure(cls, level=logging.INFO):
         """Setup global logger configuration if not already done."""
         if cls._configured: return
         
@@ -47,11 +47,17 @@ class AgentLogger:
         
         logger = colorlog.getLogger()
         logger.addHandler(handler)
-        logger.setLevel(logging.INFO)
+        logger.setLevel(level)
         
         # Silence other noisy loggers
-        logging.getLogger("httpx").setLevel(logging.WARNING)
-        logging.getLogger("httpcore").setLevel(logging.WARNING)
+        silence_list = [
+            "httpx", "httpcore", "google_genai", "google.auth",
+            "multipart.multipart", "apscheduler", "tzlocal",
+            "urllib3", "asyncio"
+        ]
+        
+        for lib in silence_list:
+            logging.getLogger(lib).setLevel(logging.WARNING)
         
         cls._configured = True
 
@@ -78,12 +84,18 @@ class AgentLogger:
             'bold_red': "\033[1;91m", 'magenta': "\033[35m"
         }
         
+        
         c = COLORS.get(color, "\033[97m")
         
+        # Fixed width for TAG to ensure alignment (e.g., 14 chars)
+        # [ICON TAG      ] TITLE
+        tag_width = 14
+        formatted_tag = f"[{tag}]".ljust(tag_width)
+        
         if details:
-            msg = f"{c}{icon} [{tag}] {title}: {RESET}{details}"
+            msg = f"{c}{formatted_tag} {title}: {RESET}{details}"
         else:
-            msg = f"{c}{icon} [{tag}] {title}{RESET}"
+            msg = f"{c}{formatted_tag} {title}{RESET}"
             
         # We print directly to stdout to ensure color preservation across all terminals
         # independent of the root logger's formatting for these specific agent events.

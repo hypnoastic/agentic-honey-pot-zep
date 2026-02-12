@@ -190,7 +190,10 @@ async def intelligence_extraction_agent(state: Dict[str, Any]) -> Dict[str, Any]
     # Schema enforcement
     final_entities = _enforce_schema(final_entities)
     
-    logger.info(f"📊 ENTITY MERGE: prior={_count_entities(existing_entities)}, new={_count_entities(combined_new_entities)}, final={_count_entities(final_entities)}")
+    # logger.info(f"📊 ENTITY MERGE: prior={_count_entities(existing_entities)}, new={_count_entities(combined_new_entities)}, final={_count_entities(final_entities)}")
+    from utils.logger import AgentLogger
+    merged_details = f"Prior={_count_entities(existing_entities)}, New={_count_entities(combined_new_entities)}, Final={_count_entities(final_entities)}"
+    AgentLogger._print_colored("INTELLIGENCE", "yellow", "📊", "Entity Merge", merged_details)
 
     return {
         "extracted_entities": final_entities,

@@ -76,11 +76,17 @@ def create_honeypot_workflow() -> StateGraph:
 
 def _pre_filter_node(state: HoneypotState) -> HoneypotState:
     from utils.prefilter import prefilter_scam_detection, extract_entities_deterministic
-    message = state.get("original_message", "")
+    from utils.logger import AgentLogger
+    logger = logging.getLogger(__name__)
+
     is_obvious, scam_type, confidence, indicators = prefilter_scam_detection(message)
     regex_entities = extract_entities_deterministic(message)
     
-    logger.info(f"PRE-FILTER: Obvious={is_obvious}, Type={scam_type}")
+    # logger.info(f"PRE-FILTER: Obvious={is_obvious}, Type={scam_type}")
+    if is_obvious:
+        AgentLogger._print_colored("PRE-FILTER", "red", "🚨", "Obvious Scam", f"Type={scam_type}, Conf={confidence}")
+    else:
+        AgentLogger._print_colored("PRE-FILTER", "white", "🔍", "Scan Result", "Not obvious, ambiguous content")
     
     res = {
         **state,
@@ -159,7 +165,10 @@ async def _parallel_intake_node(state: HoneypotState) -> Dict[str, Any]:
     }
     total_entities = sum(entity_counts.values())
     if total_entities > 0:
-        logger.info(f"📊 ENTITIES EXTRACTED: UPI={entity_counts['upi']}, Phone={entity_counts['phone']}, Account={entity_counts['account']}, URL={entity_counts['url']}, IFSC={entity_counts['ifsc']} | Total={total_entities}")
+        # logger.info(f"📊 ENTITIES EXTRACTED: UPI={entity_counts['upi']}, Phone={entity_counts['phone']}, Account={entity_counts['account']}, URL={entity_counts['url']}, IFSC={entity_counts['ifsc']} | Total={total_entities}")
+        from utils.logger import AgentLogger
+        details = f"UPI={entity_counts['upi']}, Phone={entity_counts['phone']}, Account={entity_counts['account']}, URL={entity_counts['url']}, IFSC={entity_counts['ifsc']}"
+        AgentLogger._print_colored("ENTITIES", "yellow", "📊", "Extracted", details)
     
     # Authoritative Force for entities
     high_value = len(entities.get("bank_accounts", [])) + len(entities.get("upi_ids", [])) + len(entities.get("phishing_urls", []))
@@ -247,7 +256,9 @@ async def _trigger_guvi_callback_with_retry(state: Dict[str, Any], conversation_
         logger.warning("⚠️  GUVI callback skipped: No callback URL configured (set GUVI_CALLBACK_URL in .env)")
         return False
     
-    logger.info(f"✅ Executing GUVI callback for judged scam...")
+    # logger.info(f"✅ Executing GUVI callback for judged scam...")
+    from utils.logger import AgentLogger
+    AgentLogger._print_colored("CALLBACK", "magenta", "📞", "Executing", "Sending report to GUVI endpoint...")
     
     # Use the proper GUVI callback function with correct payload format
     from utils.guvi_callback import send_guvi_callback, build_agent_notes
@@ -270,7 +281,8 @@ async def _trigger_guvi_callback_with_retry(state: Dict[str, Any], conversation_
                 scam_indicators=state.get("scam_indicators", []) + state.get("behavioral_signals", [])
             )
             if success:
-                logger.info(f"✅ GUVI callback successful for {conversation_id}")
+                # logger.info(f"✅ GUVI callback successful for {conversation_id}")
+                AgentLogger._print_colored("CALLBACK", "green", "✅", "Success", f"ID: {conversation_id}")
                 return True
             else:
                 logger.warning(f"GUVI callback attempt {attempt + 1} returned failure")
@@ -296,7 +308,9 @@ async def run_honeypot_workflow(
 ) -> Dict[str, Any]:
     
     if not conversation_id: conversation_id = str(uuid.uuid4())
-    logger.info(f"[{conversation_id[:8]}] Starting honeypot workflow")
+    # logger.info(f"[{conversation_id[:8]}] Starting honeypot workflow")
+    from utils.logger import AgentLogger
+    AgentLogger._print_colored("WORKFLOW", "cyan", "🚀", "Starting", f"ID: {conversation_id[:8]}")
     
     async with capture_session_lock(conversation_id) as txn_conn:
         # 1. Load context
@@ -323,7 +337,8 @@ async def run_honeypot_workflow(
         if memory_context.get("persona_name"):
             initial_state["persona_name"] = memory_context["persona_name"]
             initial_state["persona_context"] = memory_context.get("persona_context", "{}")
-            logger.info(f"Loaded existing persona: {memory_context['persona_name']}")
+            # logger.info(f"Loaded existing persona: {memory_context['persona_name']}")
+            AgentLogger._print_colored("MEMORY", "cyan", "🧠", "Loaded Persona", memory_context['persona_name'])
         
         if initial_history:
             initial_state["conversation_history"] = initial_history

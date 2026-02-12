@@ -149,7 +149,7 @@ def prefilter_scam_detection(message: str) -> Tuple[bool, str, float, List[str]]
     # Threshold for "obvious" scam (skip LLM)
     is_obvious = best_score >= 0.85
     
-    logger.info(f"PREFILTER: Type={best_type}, Score={best_score:.2f}, Obvious={is_obvious}, Indicators={len(all_indicators)}")
+    logger.debug(f"PREFILTER: Type={best_type}, Score={best_score:.2f}, Obvious={is_obvious}, Indicators={len(all_indicators)}")
     
     return (is_obvious, best_type, best_score, all_indicators[:5])
 
@@ -197,7 +197,7 @@ def extract_entities_deterministic(text: str) -> Dict[str, List[Dict[str, Any]]]
         entities[entity_type] = entity_list
     
     total = sum(len(v) for v in entities.values())
-    logger.info(f"PREFILTER EXTRACTION: Found {total} entities via regex")
+    logger.debug(f"PREFILTER EXTRACTION: Found {total} entities via regex")
     
     return entities
 
@@ -284,6 +284,6 @@ def filter_low_confidence(entities: Dict[str, List[Dict]], threshold: float = 0.
                 filtered[entity_type].append(entity)
     
     if discarded_count > 0:
-        logger.info(f"PREFILTER: Discarded {discarded_count} low-confidence entities")
+        logger.debug(f"PREFILTER: Discarded {discarded_count} low-confidence entities")
     
     return filtered

@@ -73,7 +73,11 @@ Respond with JSON ONLY:
 
 
 async def planner_agent(state: Dict[str, Any]) -> Dict[str, Any]:
-    logger.info("Planner Agent: Analyzing strategy...")
+    # logger.info("Planner Agent: Analyzing strategy...")
+    from utils.logger import AgentLogger
+    logger = logging.getLogger(__name__)
+    
+    AgentLogger.thought_process("PLANNER", "Analyzing conversation state and strategy...")
 
     from config import get_settings
     settings = get_settings()
@@ -180,7 +184,8 @@ async def planner_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     }
     
     # Log planner decision for visibility
-    logger.info(f"🎯 PLANNER DECISION: action={action}, strategy={strategy_hint[:80]}...")
+    # logger.info(f"🎯 PLANNER DECISION: action={action}, strategy={strategy_hint[:80]}...")
+    AgentLogger.plan_decision(turns_used, max_turns, action, strategy_hint)
 
     # -------------------------------------------------------------------------
     # VERDICT AUTHORITY HARDENING

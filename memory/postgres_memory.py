@@ -120,7 +120,6 @@ async def _load_memory_impl(conn: asyncpg.Connection, conversation_id: str) -> D
             memory_context["engagement_complete"] = meta.get("engagement_complete", False)
             memory_context["scam_detected"] = meta.get("scam_detected", False)
             memory_context["extraction_complete"] = meta.get("extraction_complete", False)
-            memory_context["callback_sent"] = meta.get("callback_sent", False)
             
             # Restore entities
             if "extracted_entities" in meta:
@@ -204,8 +203,7 @@ async def _persist_memory_impl(conn: asyncpg.Connection, conversation_id: str, s
             "engagement_count": state.get("engagement_count", 0),
             "engagement_complete": state.get("engagement_complete", False),
             "scam_detected": state.get("scam_detected", False),
-            "extraction_complete": state.get("extraction_complete", False),
-            "callback_sent": state.get("callback_sent", False)
+            "extraction_complete": state.get("extraction_complete", False)
         }
         
         # VERIFICATION LOGGING FOR USER

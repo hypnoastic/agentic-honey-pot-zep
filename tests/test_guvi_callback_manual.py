@@ -11,10 +11,9 @@ import logging
 sys.path.insert(0, '.')
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+# Configure logging
+from utils.logger import AgentLogger
+AgentLogger.configure(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 async def test_guvi_callback():

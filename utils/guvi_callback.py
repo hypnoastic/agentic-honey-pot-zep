@@ -73,15 +73,12 @@ async def send_guvi_callback(
     if not settings.guvi_callback_url:
         logger.warning("GUVI_CALLBACK_URL not set in .env, using fallback URL")
     
-    logger.info("=" * 60)
-    logger.info("[GUVI CALLBACK] SENDING FINAL RESULT TO HACKATHON ENDPOINT")
-    logger.info(f"[GUVI CALLBACK] URL: {callback_url}")
-    logger.info(f"[GUVI CALLBACK] Session ID: {session_id}")
-    logger.info(f"[GUVI CALLBACK] Scam Detected: {scam_detected}")
-    logger.info(f"[GUVI CALLBACK] Total Messages: {total_messages}")
-    logger.info(f"[GUVI CALLBACK] Full Payload:")
-    logger.info(json.dumps(payload, indent=2))
-    logger.info("=" * 60)
+    from utils.logger import AgentLogger
+    
+    AgentLogger._print_colored("GUVI", "magenta", "📞", "Sending Report", f"URL: {callback_url}")
+    # Log payload as debug unless it's small, or just print it cleanly
+    # logger.debug(json.dumps(payload, indent=2))
+    print(f"\033[95m{json.dumps(payload, indent=2)}\033[0m") # Print payload in magenta directly for visibility per user request
     
     try:
         async with httpx.AsyncClient(timeout=CALLBACK_TIMEOUT) as client:
@@ -92,16 +89,14 @@ async def send_guvi_callback(
             )
             
             if response.status_code == 200:
-                logger.info(f"[GUVI CALLBACK] ✅ SUCCESS - Status: {response.status_code}")
-                logger.info(f"[GUVI CALLBACK] Response: {response.text[:200] if response.text else 'OK'}")
+                AgentLogger._print_colored("GUVI", "green", "✅", "Success", f"Status: {response.status_code}")
                 return True
             else:
-                logger.warning(f"[GUVI CALLBACK] ❌ FAILED - Status: {response.status_code}")
-                logger.warning(f"[GUVI CALLBACK] Response Body: {response.text}")
+                AgentLogger._print_colored("GUVI", "red", "❌", "Failed", f"Status: {response.status_code} | Body: {response.text}")
                 return False
                 
     except httpx.TimeoutException:
-        logger.error(f"[GUVI CALLBACK] ⏱️ TIMEOUT - Failed to reach {callback_url}")
+        AgentLogger._print_colored("GUVI", "red", "⏱️", "Timeout", f"Failed to reach {callback_url}")
         return False
     except Exception as e:
         logger.error(f"[GUVI CALLBACK] ❌ ERROR - {type(e).__name__}: {e}")

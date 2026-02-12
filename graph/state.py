@@ -80,7 +80,6 @@ class HoneypotState(TypedDict):
     prefilter_entities: Dict[str, Any]
     
     # System Mode
-    callback_sent: bool
 
 
 
@@ -144,7 +143,6 @@ def create_initial_state(
             "ifsc_codes": prior_entities.get("ifsc_codes", [])
         },
         extraction_complete=False,
-        callback_sent=memory.get("callback_sent", False),
         
         # Scoring
         confidence_score=0.0,
