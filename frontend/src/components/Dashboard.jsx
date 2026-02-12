@@ -1,6 +1,6 @@
 /* eslint-disable react/prop-types */
 import { useState, useEffect, useRef } from 'react';
-import { X, ShieldAlert, Terminal, Activity } from 'lucide-react';
+import { X, ShieldAlert, Terminal, Activity, RefreshCw } from 'lucide-react';
 
 export default function Dashboard() {
   // Data State
@@ -8,6 +8,7 @@ export default function Dashboard() {
   const [detections, setDetections] = useState([]);
   const [logs, setLogs] = useState([]);
   const [selectedDetection, setSelectedDetection] = useState(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   
   // UI State
   const [loadingDetections, setLoadingDetections] = useState(true);
@@ -20,13 +21,17 @@ export default function Dashboard() {
   const pageRef = useRef(0);
 
   // 1. Fetch Stats
-  useEffect(() => {
+  const fetchStats = () => {
     fetch('/api/stats')
       .then(res => res.json())
       .then(data => {
         setStats(data);
       })
       .catch(err => console.error("Stats fetch failed", err));
+  };
+
+  useEffect(() => {
+    fetchStats();
   }, []);
 
   // 2. Fetch Detections
@@ -47,6 +52,24 @@ export default function Dashboard() {
     fetchDetections(0);
   }, []);
 
+  // Refresh Handler
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    // Reset pagination logic
+    pageRef.current = 0;
+    setHasMoreDetections(true);
+    setLoadingDetections(true);
+    
+    // Parallel fetch
+    await Promise.all([
+        fetchStats(),
+        fetchDetections(0)
+    ]);
+    
+    // Clear logs if connection lost? No, just keep them.
+    setIsRefreshing(false);
+  };
+
   // Infinite Scroll Handler
   const handleScroll = () => {
     if (detectionsContainerRef.current) {
@@ -66,7 +89,6 @@ export default function Dashboard() {
     const connect = () => {
         const ws = new WebSocket(wsUrl);
         ws.onopen = () => {
-            console.log("WS Connected");
             setLogs(prev => [...prev.slice(-99), { timestamp: new Date().toLocaleTimeString(), message: "Connected to live stream.", type: "success" }]);
         };
         ws.onmessage = (event) => {
@@ -78,7 +100,6 @@ export default function Dashboard() {
             }
         };
         ws.onclose = () => {
-            console.log("WS Closed, retrying...");
             setTimeout(connect, 3000);
         };
         wsRef.current = ws;
@@ -111,11 +132,21 @@ export default function Dashboard() {
   return (
     <div className="flex flex-col h-screen w-screen bg-black text-white overflow-hidden p-6 font-sans selection:bg-white selection:text-black">
       {/* Dashboard Title */}
-      <header className="mb-6 shrink-0 border-b border-zinc-800 pb-4">
+      <header className="mb-6 shrink-0 border-b border-zinc-800 pb-4 flex justify-between items-center bg-transparent">
          <h1 className="text-3xl font-bold tracking-tight text-white flex items-center gap-3">
             DASHBOARD
             <span className="text-xs font-mono text-zinc-500 ml-auto bg-zinc-900 px-2 py-1 rounded border border-zinc-800">AGENTIC HONEY-POT v1.1.0</span>
          </h1>
+         
+         {/* Refresh Button */}
+         <button 
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            className="p-2 rounded-full hover:bg-zinc-800 transition-all border border-transparent hover:border-zinc-700 group focus:outline-none"
+            title="Refresh Data"
+         >
+            <RefreshCw className={`w-5 h-5 text-zinc-400 group-hover:text-white transition-colors ${isRefreshing ? 'animate-spin text-green-500' : ''}`} />
+         </button>
       </header>
 
       {/* SECTION 1: Top Stats (30%) */}
@@ -254,7 +285,7 @@ function DetectionDetailView({ data }) {
                                     <div className="flex flex-wrap gap-2 mt-1">
                                         {vals.map((v, i) => (
                                             <span key={i} className="bg-red-500/10 text-red-300 px-2 py-1 rounded text-sm font-mono border border-red-500/20 select-all">
-                                                {v}
+                                                {typeof v === 'object' ? (v.value || JSON.stringify(v)) : v}
                                             </span>
                                         ))}
                                     </div>

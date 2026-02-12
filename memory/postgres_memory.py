@@ -669,7 +669,7 @@ async def get_recent_detections(limit: int = 20, offset: int = 0) -> List[Dict[s
                 
                 results.append({
                     "id": r['session_id'],
-                    "type": r['scam_type'],
+                    "scam_type": r['scam_type'],
                     "summary": r['summary'],
                     "timestamp": r['created_at'].isoformat(),
                     "confidence": p.get('confidence', 0),
