@@ -184,7 +184,10 @@ async def analyze_message(
         
         # Log full detailed message now that we have safely parsed it
         logger.info(f"[{request_id}] HEADERS: {raw_request.headers}")
-        logger.info(f"[{request_id}] ANALYZING MESSAGE BODY: {message}")
+        
+        # Use AgentLogger for colored input
+        from utils.logger import AgentLogger
+        AgentLogger._print_colored(f"{request_id}", "orange", "ANALYZING MESSAGE BODY", message)
         
         # 3. Extract conversation history for multi-turn support (Section 6.2)
         conversation_history = []

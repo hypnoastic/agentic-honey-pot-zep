@@ -241,7 +241,10 @@ def _validate_llm_output_against_text(
         validated[entity_type] = []
 
         for item in items:
-            value = str(item.get("value", ""))
+            if isinstance(item, str):
+                value = item
+            else:
+                value = str(item.get("value", ""))
             if not value:
                 continue
 

@@ -97,9 +97,12 @@ class AgentLogger:
         else:
             msg = f"{c}{formatted_tag} {title}{RESET}"
             
-        # We print directly to stdout to ensure color preservation across all terminals
-        # independent of the root logger's formatting for these specific agent events.
-        print(msg)
+        # Use the root logger to ensure timestamp and order consistency
+        # We pass the pre-colored message; the ColorLog formatter handles the rest
+        # dependent on configuration, but here we baked color in.
+        # To avoid double-formatting if using colorlog root, we might need care.
+        # But simpler: Just use logging.info to get the timestamp.
+        logging.getLogger().info(msg)
         
         # Also log to file/system logger (stripped of color codes for purity if needed, but we keep simple)
         # logging.info(msg) # Avoid double printing if using StreamHandler

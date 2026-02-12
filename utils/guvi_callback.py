@@ -75,10 +75,10 @@ async def send_guvi_callback(
     
     from utils.logger import AgentLogger
     
-    AgentLogger._print_colored("GUVI", "magenta", "📞", "Sending Report", f"URL: {callback_url}")
+    AgentLogger._print_colored("GUVI", "purple", "Sending Report", f"URL: {callback_url}")
     # Log payload as debug unless it's small, or just print it cleanly
     # logger.debug(json.dumps(payload, indent=2))
-    print(f"\033[95m{json.dumps(payload, indent=2)}\033[0m") # Print payload in magenta directly for visibility per user request
+    print(f"\033[96m{json.dumps(payload, indent=2)}\033[0m") # Print payload in cyan directly for visibility per user request
     
     try:
         async with httpx.AsyncClient(timeout=CALLBACK_TIMEOUT) as client:
