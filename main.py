@@ -62,6 +62,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def log_404_headers(request: Request, call_next):
+    """Debug middleware to log headers for failed requests."""
+    response = await call_next(request)
+    if response.status_code == 404 and "ws" in request.url.path:
+        logger.error(f"404 for {request.url.path}")
+        logger.error(f"Headers: {dict(request.headers)}")
+    return response
+
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
@@ -329,5 +338,7 @@ if __name__ == "__main__":
         "main:app",
         host=settings.host,
         port=settings.port,
-        reload=settings.debug
+        reload=settings.debug,
+        proxy_headers=True, # Trust Nginx headers
+        forwarded_allow_ips="*" # Trust all proxies (safe behind Nginx)
     )
