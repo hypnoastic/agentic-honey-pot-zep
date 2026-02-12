@@ -65,7 +65,6 @@ def create_honeypot_workflow() -> StateGraph:
     )
     
     workflow.add_edge("persona_engagement", "response_formatter")
-    workflow.add_edge("intelligent_extraction", "response_formatter")
     workflow.add_edge("response_formatter", END)
     
     return workflow.compile()
