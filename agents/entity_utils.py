@@ -1,3 +1,6 @@
+from typing import Dict
+
+
 def merge_entities(entities_a: Dict, entities_b: Dict) -> Dict:
     """
     Merge two entity dictionaries, combining lists and removing duplicates.
