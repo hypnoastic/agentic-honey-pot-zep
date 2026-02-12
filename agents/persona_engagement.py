@@ -171,7 +171,13 @@ async def _generate_unique_persona(state: Dict[str, Any]) -> Dict:
 
     traits = state.get("persona_traits", {})
     if traits:
-        traits_instruction = ", ".join([f"{k}: {v}" for k, v in traits.items()])
+        # Filter out identity-specific fields to force unique generation
+        # We only want behavioral traits (e.g., "Anxious", "Skeptical")
+        safe_traits = {k: v for k, v in traits.items() if k not in ["name", "age", "occupation", "context", "voice"]}
+        if safe_traits:
+            traits_instruction = ", ".join([f"{k}: {v}" for k, v in safe_traits.items()])
+        else:
+            traits_instruction = "Choose traits matching scam context. ensure UNIQUE identity."
     else:
         traits_instruction = "Choose traits matching scam context."
 

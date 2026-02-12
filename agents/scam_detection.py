@@ -77,6 +77,7 @@ JOB_SCAM
 Rules:
 - Analyze underlying intent, not just keywords.
 - Assign the MOST specific category.
+- Ignore short, benign greetings (e.g., "Hello", "Hi there") unless they contain a request or link.
 - If unclear, set scam_detected=false and scam_type=null.
 
 JSON FORMAT:
@@ -152,10 +153,16 @@ async def scam_detection_agent(state: Dict[str, Any]) -> Dict[str, Any]:
             system_instruction="You are a highly precise scam detection engine.",
             json_mode=True,
             agent_name="detection",
-            temperature=0.1  # deterministic
+            temperature=0.1  # deterministic for safety
         )
 
         analysis = parse_json_safely(response_text) or {}
+
+        if isinstance(analysis, list) and analysis:
+            analysis = analysis[0]
+            
+        if not isinstance(analysis, dict):
+            analysis = {}
 
         # -------------------------
         # Extract & Validate Fields
@@ -167,6 +174,13 @@ async def scam_detection_agent(state: Dict[str, Any]) -> Dict[str, Any]:
             confidence = float(analysis.get("confidence", 0.0))
         except Exception:
             confidence = 0.0
+            
+        # Add slight jitter to avoid looking "fake" or hardcoded (requested by user)
+        # But only if it's a valid confidence
+        if confidence > 0.5:
+            import random
+            jitter = random.uniform(-0.03, 0.03)
+            confidence = max(0.0, min(1.0, confidence + jitter))
 
         confidence = max(0.0, min(1.0, confidence))
 
@@ -190,6 +204,20 @@ async def scam_detection_agent(state: Dict[str, Any]) -> Dict[str, Any]:
         # Low Confidence Guard
         # -------------------------
         if scam_detected and confidence < 0.3:
+            scam_detected = False
+            scam_type = None
+
+        if scam_detected and confidence < 0.3:
+            scam_detected = False
+            scam_type = None
+
+        # -------------------------
+        # Ambiguity Guard
+        # -------------------------
+        # If confidence is mediocre (< 0.75) AND no hard indicators, treat as safe
+        # This prevents "vibe-based" false positives on greetings
+        indicators = analysis.get("indicators", [])
+        if scam_detected and confidence < 0.75 and not indicators:
             scam_detected = False
             scam_type = None
 

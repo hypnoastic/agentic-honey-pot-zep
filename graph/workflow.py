@@ -370,7 +370,8 @@ async def run_honeypot_workflow(
             # 3. No callback was sent (success override)
             if (final_state.get("engagement_count", 0) >= 3 
                 and total_extracted == 0 
-                and not final_state.get("callback_sent", False)):
+                and not final_state.get("callback_sent", False)
+                and not final_state.get("scam_detected", False)):
                 
                 from memory.postgres_memory import add_failure_event
                 await add_failure_event(conversation_id, dict(final_state))

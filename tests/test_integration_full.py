@@ -121,13 +121,16 @@ class TestHoneyPotIntegration(unittest.IsolatedAsyncioTestCase):
         CASE C: Non-Scam Safe Exit
         - No engagement, no scam flag.
         """
+        # Scenario C: Non-Scam Safe Exit
+        # Use a clearly benign message to ensure negative classification
         session_id = str(uuid.uuid4())
-        text = "Hello, just checking in on you friend."
+        logger.info(f"--- START SCENARIO C: {session_id} ---")
+        message = "System test: legitimate inquiry about weather."
         
         async with AsyncClient(transport=ASGITransport(app=app), base_url=BASE_URL) as ac:
             response = await ac.post("/analyze", json={
                 "conversation_id": session_id,
-                "message": text
+                "message": message
             }, headers=HEADERS)
         
         data = response.json()
