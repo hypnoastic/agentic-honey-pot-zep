@@ -55,7 +55,10 @@ EXTRACTED EVIDENCE:
 - Scam Indicators: {scam_indicators}
 
 DECISION LOGIC:
-1. "engage": Stall/Waste time. Ask for verification, payment details, or official links.
+1. "engage":
+   - **Turns 0-5 (STALL)**: Use `strategy_hint` starting with "STALL:". E.g., "STALL: Ask for official ID/Link".
+   - **Turns 6-8 (EXTRACT)**: Use `strategy_hint` starting with "EXTRACT:". E.g., "EXTRACT: Ask for Bank Account/UPI".
+   - **Turn 9+**: Use "EXTRACT:" or "judge".
 2. "judge": Conclude if: Key info extracted, Max turns reached, or Scammer stopped.
 3. "end": Only if NOT a scam.
 
@@ -65,7 +68,7 @@ Target 3-4 focused turns.
 Respond with JSON ONLY:
 {{
     "action": "engage" | "judge" | "end",
-    "strategy_hint": "Brief guidance for the persona...",
+    "strategy_hint": "MUST start with 'STALL: [tactic]' or 'EXTRACT: [data]'. Example: 'STALL: Feign confusion' or 'EXTRACT: Ask for UPI ID'.",
     "verdict": "GUILTY" | "INNOCENT" | "SUSPICIOUS" | null,
     "confidence_score": 0.0-1.0 | null,
     "reasoning": "Explanation of verdict..." | null
@@ -366,6 +369,6 @@ def _build_prompt(state: Dict[str, Any], turns_used: int, max_turns: int, high_v
 def _safe_fallback() -> Dict[str, Any]:
     return {
         "planner_action": "engage",
-        "strategy_hint": "Fallback due to planning error. Continue engagement safely.",
+        "strategy_hint": "STALL: Fallback due to error. Feign confusion and ask for clarification.",
         "current_agent": "planner"
     }

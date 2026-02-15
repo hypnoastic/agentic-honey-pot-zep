@@ -101,5 +101,9 @@ class AnalyzeResponse(BaseModel):
         default=0,
         description="Number of engagement turns"
     )
+    strategy_hint: Optional[str] = Field(
+        default=None,
+        description="Strategy guidance from Planner (internal/verification)"
+    )
 
 

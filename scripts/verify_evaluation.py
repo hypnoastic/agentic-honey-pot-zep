@@ -58,6 +58,7 @@ async def run_verification():
                 "conversationHistory": conversation_history,
                 "metadata": TEST_SCENARIO['metadata']
             }
+            # logger.info(f"📤 Payload: {json.dumps(payload)}")
             
             # Call API
             response = await client.post("/analyze", json=payload, headers=headers)
@@ -69,11 +70,14 @@ async def run_verification():
                 
             data = response.json()
             reply = data.get("reply")
+            strategy = data.get("strategy_hint", "N/A")
+            logger.info(f"🧠 Strategy: {strategy}")
             logger.info(f"✅ Honeypot: {reply}")
+            print(f"Scammer: {current_message}\nStrategy: {strategy}\nHoneypot: {reply}\n{'-'*20}")
             
             # Update History
-            conversation_history.append({"sender": "scammer", "text": current_message, "timestamp": int(datetime.utcnow().timestamp())})
-            conversation_history.append({"sender": "user", "text": reply, "timestamp": int(datetime.utcnow().timestamp())})
+            conversation_history.append({"sender": "scammer", "text": str(current_message), "timestamp": int(datetime.utcnow().timestamp())})
+            conversation_history.append({"sender": "user", "text": str(reply or "Thinking..."), "timestamp": int(datetime.utcnow().timestamp())})
             
             # Check for conclusion - SMARTER ENGAGEMENT TEST (T8/T9 Leakage)
             if turn >= 8: 

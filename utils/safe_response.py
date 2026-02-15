@@ -41,6 +41,7 @@ def construct_safe_response(result: Dict[str, Any], conversation_id: str) -> Ana
         scam_type = final.get("scam_type") or result.get("scam_type")
         entities = final.get("extracted_entities") or result.get("extracted_entities", {})
         turns = final.get("engagement_count") or result.get("engagement_count", 0)
+        strategy = final.get("strategy_hint") or result.get("strategy_hint")
         
         return AnalyzeResponse(
             status="success",
@@ -48,7 +49,8 @@ def construct_safe_response(result: Dict[str, Any], conversation_id: str) -> Ana
             scam_detected=bool(scam_detected),
             scam_type=scam_type,
             extracted_entities=entities,
-            engagement_count=int(turns)
+            engagement_count=int(turns),
+            strategy_hint=strategy
         )
     except Exception as e:
         logger.error(f"Error constructing safe response: {e}")

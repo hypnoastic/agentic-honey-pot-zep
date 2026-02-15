@@ -158,6 +158,12 @@ async def _parallel_intake_node(state: HoneypotState) -> Dict[str, Any]:
     # Merged deltas
     merged_delta = {**assessment_res, **extraction_res}
     
+    # Authoritative Force: Sticky Scam Detection
+    if state.get("scam_detected"):
+        merged_delta["scam_detected"] = True
+        if not merged_delta.get("scam_type"):
+            merged_delta["scam_type"] = state.get("scam_type")
+    
     # Log extracted entities for visibility
     entities = merged_delta.get("extracted_entities", {})
     entity_counts = {

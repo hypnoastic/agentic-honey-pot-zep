@@ -73,6 +73,7 @@ async def response_formatter_agent(state: Dict[str, Any]) -> Dict[str, Any]:
         "conversation_summary": summary,
         "persona_name": state.get("persona_name"),
         "engagement_count": state.get("engagement_count", 0),
+        "strategy_hint": state.get("strategy_hint"),
         "reply": (state.get("final_response") or {}).get("agent_response")
     }
 
