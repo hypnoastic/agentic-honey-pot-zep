@@ -56,10 +56,10 @@ EXTRACTED EVIDENCE:
 
 DECISION LOGIC:
 1. "engage":
-   - **Turns 0-5 (STALL)**: Use `strategy_hint` starting with "STALL:". E.g., "STALL: Ask for official ID/Link".
+   - **Turns 0-5 (MANDATORY STALL)**: You MUST NOT judge before Turn 5. Use `strategy_hint` starting with "STALL:". E.g., "STALL: Ask for official ID/Link".
    - **Turns 6-8 (EXTRACT)**: Use `strategy_hint` starting with "EXTRACT:". E.g., "EXTRACT: Ask for Bank Account/UPI".
    - **Turn 9+**: Use "EXTRACT:" or "judge".
-2. "judge": Conclude if: Key info extracted, Max turns reached, or Scammer stopped.
+2. "judge": Conclude if: Key info extracted, Max turns reached, or Scammer stopped. (NOT allowed before Turn 5).
 3. "end": Only if NOT a scam.
 
 DIVERSITY EXIT: Prioritize getting different types (UPI+Bank+URL) over count.
@@ -180,6 +180,15 @@ async def planner_agent(state: Dict[str, Any]) -> Dict[str, Any]:
 
     strategy_hint = plan.get("strategy_hint", "Continue engagement.")
 
+    # -------------------------------------------------------------------------
+    # MANDATORY MINIMUM TURNS (Strict Override)
+    # -------------------------------------------------------------------------
+    if turns_used < 5 and action == "judge":
+        logger.warning(f"LLM tried to judge at Turn {turns_used}. Overriding to engage for minimum 5-turn requirement.")
+        action = "engage"
+        if not strategy_hint.startswith("STALL:"):
+            strategy_hint = f"STALL: {strategy_hint}"
+
     result = {
         "planner_action": action,
         "strategy_hint": strategy_hint,
@@ -290,11 +299,9 @@ def _check_smart_exit(high_value: int, total: int, turns: int, max_turns: int, d
         return False, "Turn 0: Continue engagement"
     
     # PHASE 1: STALL & BUILD TRUST (Turns 1-5)
-    # Strictly Engage unless we hit the jackpot (all 3 critical types)
+    # Strictly Engage. No early exits allowed before Turn 6.
     elif 1 <= turns <= 5:
-        if high_value >= 4 and distinct_types >= 3:
-            return True, f"T{turns}: Jackpot yield ({high_value} entities). Rare early exit."
-        return False, "Stall Phase. Build trust. Do not rush."
+        return False, "Mandatory Stall Phase. Build trust for at least 5 turns."
 
     # PHASE 2: PEAK EXTRACTION (Turns 6-8)
     # This is where we want to harvest. Exit if we have decent yield.
