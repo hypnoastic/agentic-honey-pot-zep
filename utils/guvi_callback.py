@@ -58,6 +58,7 @@ async def send_guvi_callback(
             "upiIds": flatten(extracted_intelligence.get("upi_ids", [])),
             "phishingLinks": flatten(extracted_intelligence.get("phishing_urls", [])),
             "phoneNumbers": flatten(extracted_intelligence.get("phone_numbers", [])),
+            "emailAddresses": flatten(extracted_intelligence.get("email_addresses", [])),
             "suspiciousKeywords": scam_indicators or flatten(extracted_intelligence.get("keywords", []))
         },
         "agentNotes": agent_notes

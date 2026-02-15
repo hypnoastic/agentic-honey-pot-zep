@@ -21,8 +21,8 @@ logger = logging.getLogger(__name__)
 ALLOWED_ACTIONS = {"engage", "judge", "end"}
 ALLOWED_VERDICTS = {"GUILTY", "INNOCENT", "SUSPICIOUS"}
 
-PLANNER_PROMPT = """STRATEGIC PLANNER: Waste time AND extract intelligence (Bank, UPI, URL, Phone).
-GOAL: High-efficiency extraction (3-4 turns target).
+PLANNER_PROMPT = """STRATEGIC PLANNER: Waste time THEN extract.
+GOAL: Stall Turns 1-5. PEAK EXTRACTION Turns 6-8. Force Exit Turn 9+.
 
 CURRENT STATE:
 - Scam Detected: {scam_detected}
@@ -278,6 +278,7 @@ def _check_smart_exit(high_value: int, total: int, turns: int, max_turns: int, d
     - Turn 7-9:  >=2 high-value
     - Turn 10+:  Force exit
     """
+    # Updated Exit Strategy for Smarter Engagement (Phase 5)
     if turns >= 10:
         return True, f"Max turns reached ({turns}). Forced exit."
     
@@ -285,22 +286,26 @@ def _check_smart_exit(high_value: int, total: int, turns: int, max_turns: int, d
     if turns == 0:
         return False, "Turn 0: Continue engagement"
     
-    # Higher thresholds for early turns
-    elif 1 <= turns <= 2:
-        if high_value >= 4 and distinct_types >= 2:
-            return True, f"T{turns}: High-quality yield ({high_value} entities, {distinct_types} types)."
-    elif 3 <= turns <= 4:
-        if high_value >= 3 and distinct_types >= 2:
-            return True, f"T{turns}: High-yield lead ({high_value} entities)."
-    elif 3 <= turns <= 4:
-        if high_value >= 3 or (high_value >= 2 and distinct_types >= 2):
-            return True, f"T{turns}: Significant yield ({high_value} entities, {distinct_types} types)."
-    elif 5 <= turns <= 6:
+    # PHASE 1: STALL & BUILD TRUST (Turns 1-5)
+    # Strictly Engage unless we hit the jackpot (all 3 critical types)
+    elif 1 <= turns <= 5:
+        if high_value >= 4 and distinct_types >= 3:
+            return True, f"T{turns}: Jackpot yield ({high_value} entities). Rare early exit."
+        return False, "Stall Phase. Build trust. Do not rush."
+
+    # PHASE 2: PEAK EXTRACTION (Turns 6-8)
+    # This is where we want to harvest. Exit if we have decent yield.
+    elif 6 <= turns <= 8:
         if high_value >= 2:
-            return True, f"T{turns}: Sufficient yield ({high_value} entities)."
-    elif 7 <= turns <= 9:
+            return True, f"T{turns}: Peak phase target reached ({high_value} entities)."
+    
+    # PHASE 3: CLEANUP (Turn 9+)
+    # Exit if we have ANY yield at all.
+    elif turns >= 9:
         if high_value >= 1:
-            return True, f"T{turns}: Lead secured ({high_value} entity)."
+            return True, "Late game cleanup. Exiting with minimal yield."
+            
+    return False, ""
             
     return False, ""
 

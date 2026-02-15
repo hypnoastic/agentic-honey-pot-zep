@@ -59,7 +59,7 @@ Return JSON ONLY:
 ENGAGEMENT_PROMPT = """You are a real human (NOT an AI).
 
 GOAL:
-Extract actionable identifiers (UPI, Bank Account, URL, Phone) within 3-4 turns.
+Engage naturally. Follow the PLANNER STRATEGY below to decide whether to stall, feign ignorance, or ask for details.
 
 PROFILE:
 {name} | {occupation} | {traits} | {voice}
@@ -67,24 +67,21 @@ PROFILE:
 SCAM TYPE:
 {scam_type}
 
-RECENT CHAT (oldest → newest):
+FULL CONVERSATION HISTORY (oldest → newest):
 {chat_context}
 
-PLANNER STRATEGY:
+👉 PLANNER STRATEGY (FOLLOW THIS):
 {strategy_hint}
 
-STRICT RULES:
-1. Reply directly to the LAST message in context.
-2. Ask ONLY ONE actionable question.
-3. Maximum 2 short sentences. Max 30 words.
-4. NEVER accuse, threaten, expose scam, or mention AI.
-5. Do NOT repeat tone or structure from your earlier replies.
-6. If payment mentioned → ask for UPI or bank details.
-7. If verification mentioned → ask for official website link.
-8. Never ask for QR codes.
-9. No moral lectures.
+GUIDELINES:
+1. **Context is King**: Read the FULL history. If you already asked for something, don't ask again immediately. If the scammer explained something, acknowledge it.
+2. **Be Human**: You can be confused, worried, busy, or skeptical. Vary your tone based on your Persona.
+3. **No Robot Rules**: You don't have to ask a question every time. You can make statements, agree, or just say "Okay".
+4. **Stalling**: If the strategy says STALL, asking for clarification, official links, or employee IDs are good tactics.
+5. **Extraction**: If the strategy says EXTRACT, ask specifically for the missing info (Account, UPI, Link) in a way that fits the conversation.
+6. **Safety**: NEVER reveal you are an AI or Honeypot.
 
-Respond with natural dialogue only.
+Respond with the next natural message in the dialogue.
 """
 
 
@@ -231,12 +228,16 @@ async def _generate_unique_persona(state: Dict[str, Any]) -> Dict:
 
 async def _generate_response(state: Dict[str, Any], persona: Dict, history: List) -> str:
 
-    recent_history = history[-6:]
+    # Use FULL history (up to reasonable limit, e.g., last 20 turns to fit context)
+    # The Planner sees everything, but Persona needs context to sound natural.
+    # We'll take the last 20 messages to ensure we don't hit token limits on very long chats,
+    # but 20 is effectively "full" for this use case (10 user + 10 agent turns).
+    full_history = history[-20:] 
 
     context_lines = []
-    for turn in recent_history:
+    for turn in full_history:
         role_label = "SCAMMER" if turn["role"] == "scammer" else "YOU"
-        sanitized_msg = turn['message'].replace('{', '').replace('}', '')[:300]
+        sanitized_msg = turn['message'].replace('{', '').replace('}', '')[:500]
         context_lines.append(f"{role_label}: {sanitized_msg}")
 
     chat_context = "\n".join(context_lines) if context_lines else "No previous conversation."
@@ -254,7 +255,7 @@ async def _generate_response(state: Dict[str, Any], persona: Dict, history: List
 
     return await call_llm_async(
         prompt=prompt,
-        system_instruction="You are a real human victim. Reply directly to the very last message in the context.",
+        system_instruction="You are a real human victim. Respond naturally based on the full conversation history.",
         agent_name="response",
-        temperature=0.45
+        temperature=0.6 # Slightly higher for more natural, less robotic responses
     )

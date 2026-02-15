@@ -84,6 +84,7 @@ EXPECTED_ENTITY_KEYS = {
     "phone_numbers",
     "phishing_urls",
     "ifsc_codes",
+    "email_addresses",
 }
 
 
@@ -99,11 +100,9 @@ async def intelligence_extraction_agent(state: Dict[str, Any]) -> Dict[str, Any]
     conversation_history = state.get("conversation_history", [])
 
     scammer_messages = [t for t in conversation_history if t["role"] == "scammer"]
-    latest_text = (
-        scammer_messages[-1]["message"]
-        if scammer_messages
-        else state.get("original_message", "")
-    )
+    latest_text = state.get("original_message", "")
+    if not latest_text and scammer_messages:
+        latest_text = scammer_messages[-1]["message"]
 
     if not latest_text:
         return {"current_agent": "planner"}

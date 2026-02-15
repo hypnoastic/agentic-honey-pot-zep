@@ -79,7 +79,7 @@ class Settings(BaseSettings):
     cors_origins: str = os.getenv("CORS_ORIGINS", "*")
     
     # Agent Configuration
-    max_engagement_turns: int = int(os.getenv("MAX_ENGAGEMENT_TURNS", "5"))
+    max_engagement_turns: int = int(os.getenv("MAX_ENGAGEMENT_TURNS", "10"))
     scam_detection_threshold: float = float(os.getenv("SCAM_DETECTION_THRESHOLD", "0.6"))
     max_message_length: int = int(os.getenv("MAX_MESSAGE_LENGTH", "10000"))
     

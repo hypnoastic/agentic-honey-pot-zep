@@ -378,8 +378,8 @@ async def run_honeypot_workflow(
         except Exception as e:
             logger.warning(f"Failed to log failure event: {e}")
         
-        # 5. Callback with retry - ONLY if planner explicitly decided to judge and not already sent
-        if final_state.get("planner_action") == "judge" and final_state.get("judge_verdict") == "GUILTY" and not final_state.get("callback_sent", False):
+        # 5. Callback with retry - Trigger on any judgment (even if innocent) to ensure reporting
+        if final_state.get("planner_action") == "judge" and not final_state.get("callback_sent", False):
             if await _trigger_guvi_callback_with_retry(final_state, conversation_id):
                 final_state["callback_sent"] = True
     

@@ -94,6 +94,9 @@ ENTITY_PATTERNS: Dict[str, List[str]] = {
         r"https?://[^\s<>\"']+",
         r"\b(?:bit\.ly|tinyurl\.com|goo\.gl|is\.gd|t\.co)/[\w]+",
     ],
+    "email_addresses": [
+        r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",
+    ],
 }
 
 
@@ -217,7 +220,7 @@ def merge_entities(regex_entities: Dict, llm_entities: Dict) -> Dict[str, List[D
     """
     merged = {}
     
-    for entity_type in ["upi_ids", "bank_accounts", "phishing_urls", "phone_numbers", "ifsc_codes"]:
+    for entity_type in ["upi_ids", "bank_accounts", "phishing_urls", "phone_numbers", "ifsc_codes", "email_addresses"]:
         regex_list = regex_entities.get(entity_type, [])
         llm_list = llm_entities.get(entity_type, [])
         
