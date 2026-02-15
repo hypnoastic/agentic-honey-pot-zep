@@ -30,13 +30,13 @@ class Settings(BaseSettings):
     api_retry_attempts: int = int(os.getenv("API_RETRY_ATTEMPTS", "3"))
     
     # Per-Agent Model Selection
-    planner_model: str = os.getenv("PLANNER_MODEL", "gemini-3-flash-preview")
-    detection_model: str = os.getenv("DETECTION_MODEL", "gemini-3-flash-preview")
-    persona_model: str = os.getenv("PERSONA_MODEL", "gemini-3-flash-preview")
-    response_model: str = os.getenv("RESPONSE_MODEL", "gemini-3-flash-preview")
-    extraction_model: str = os.getenv("EXTRACTION_MODEL", "gemini-3-flash-preview")
-    judge_model: str = os.getenv("JUDGE_MODEL", "gemini-3-flash-preview")
-    factcheck_model: str = os.getenv("FACTCHECK_MODEL", "gemini-3-flash-preview")
+    planner_model: str = os.getenv("PLANNER_MODEL", "gemini-2.0-flash")
+    detection_model: str = os.getenv("DETECTION_MODEL", "gemini-2.0-flash")
+    persona_model: str = os.getenv("PERSONA_MODEL", "gemini-2.0-flash")
+    response_model: str = os.getenv("RESPONSE_MODEL", "gemini-2.0-flash")
+    extraction_model: str = os.getenv("EXTRACTION_MODEL", "gemini-2.0-flash")
+    judge_model: str = os.getenv("JUDGE_MODEL", "gemini-2.0-flash")
+    factcheck_model: str = os.getenv("FACTCHECK_MODEL", "gemini-2.0-flash")
     
     # Embeddings (Strictly GPT)
     embedding_model: str = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
