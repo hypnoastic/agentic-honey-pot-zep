@@ -20,11 +20,10 @@ from config import get_settings
 from utils.parsing import parse_json_safely
 from utils.prefilter import (
     extract_entities_deterministic,
-    merge_entities, # This import will be replaced or supplemented
     filter_low_confidence,
 )
-from agents.entity_utils import merge_entities # Added this line
-from utils.llm_client import call_llm_async # Moved this to top-level
+from agents.entity_utils import merge_entities, normalize_entity_value, disambiguate_entities
+from utils.llm_client import call_llm_async
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
@@ -258,24 +257,20 @@ def _validate_llm_output_against_text(
 
 
 def _normalize_entities(entities: Dict) -> Dict:
-    """Canonical normalization layer."""
+    """Canonical normalization layer using entity_utils."""
     normalized = {}
 
     for key, items in entities.items():
         normalized[key] = []
-
         for item in items:
             if isinstance(item, dict):
-                value = item.get("value", "").strip()
-                value = re.sub(r"\s+", "", value)
-
-                if key == "upi_ids":
-                    value = value.lower()
-
-                item["value"] = value
+                raw_val = item.get("value", "")
+                norm_val = normalize_entity_value(raw_val, key)
+                item["value"] = norm_val
                 normalized[key].append(item)
 
-    return normalized
+    # Disambiguate after normalization
+    return disambiguate_entities(normalized)
 
 
 def _safe_confidence_merge(existing: Dict, new: Dict) -> Dict:

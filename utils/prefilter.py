@@ -207,55 +207,11 @@ def extract_entities_deterministic(text: str) -> Dict[str, List[Dict[str, Any]]]
 
 def merge_entities(regex_entities: Dict, llm_entities: Dict) -> Dict[str, List[Dict[str, Any]]]:
     """
-    Merge regex-extracted and LLM-verified entities.
-    Regex entities have priority (confidence=1.0).
-    LLM entities are added if not duplicates.
-    
-    Args:
-        regex_entities: Entities from regex extraction
-        llm_entities: Entities from LLM verification
-        
-    Returns:
-        Merged entity dict
+    Merge regex-extracted and LLM-verified entities using the specialized 
+    logic in agents.entity_utils.
     """
-    merged = {}
-    
-    for entity_type in ["upi_ids", "bank_accounts", "phishing_urls", "phone_numbers", "ifsc_codes", "email_addresses"]:
-        regex_list = regex_entities.get(entity_type, [])
-        llm_list = llm_entities.get(entity_type, [])
-        
-        # Start with regex entities
-        if isinstance(regex_list, list) and regex_list:
-            if isinstance(regex_list[0], dict):
-                merged[entity_type] = list(regex_list)
-            else:
-                # Legacy format: just strings
-                merged[entity_type] = [{"value": v, "confidence": 1.0, "source": "explicit"} for v in regex_list]
-        else:
-            merged[entity_type] = []
-        
-        # Add LLM entities if not duplicates
-        existing_values = {e.get("value", e) if isinstance(e, dict) else e for e in merged[entity_type]}
-        
-        if isinstance(llm_list, list):
-            for item in llm_list:
-                if isinstance(item, dict):
-                    value = item.get("value", "")
-                    if value and value not in existing_values:
-                        # LLM entities get lower confidence unless verified
-                        item.setdefault("confidence", 0.8)
-                        item.setdefault("source", "inferred")
-                        merged[entity_type].append(item)
-                        existing_values.add(value)
-                elif isinstance(item, str) and item not in existing_values:
-                    merged[entity_type].append({
-                        "value": item,
-                        "confidence": 0.8,
-                        "source": "inferred"
-                    })
-                    existing_values.add(item)
-    
-    return merged
+    from agents.entity_utils import merge_entities as core_merge
+    return core_merge(regex_entities, llm_entities)
 
 
 def filter_low_confidence(entities: Dict[str, List[Dict]], threshold: float = 0.6) -> Dict[str, List[Dict]]:
