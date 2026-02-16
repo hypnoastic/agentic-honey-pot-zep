@@ -1,29 +1,37 @@
 # Neepot AI: Agentic Honey-Pot System
 
-**Neepot AI** is a sophisticated, multi-agent automated scambaiting system designed to detect, engage, and extract intelligence from cyber-scammers. It moves beyond simple rule-based detection by deploying a team of specialized Loop-and-Human-in-the-Loop (HITL) agents that collaborate to autonomously waste scammers' time while mining high-value actionable intelligence.
+**Neepot AI** is an advanced, autonomous scambaiting system designed to detect, stall, and extract high-value intelligence from cyber-scammers. Powered by **Google Gemini 2.5 Flash** and **LangGraph**, it deploys a team of specialized agents that collaborate to waste scammers' time while mining actionable data (Bank Accounts, UPI IDs, Phishing Links).
 
-## 1. System Architecture
+## 🚀 Key Features
 
-The system is architected as a stateful graph application using **LangGraph**. Unlike linear chains, this graph architecture allows for cyclic agentic behaviors (e.g., engage -> extract -> plan -> engage), enabling dynamic and prolonged conversations.
+- **🧠 Strategic Planner**: The "Brain" of the system. Enforces a **mandatory 5-turn minimum engagement** to build trust (STALL phase) before pivoting to aggressive data harvesting (EXTRACT phase).
+- **🎭 Adaptive Persona**: Dynamically generates victim profiles (e.g., "confused elderly person", "anxious student") to match the specific scam topology.
+- **🛡️ Sticky Detection**: Once a scam is detected, the system locks into "Honeypot Mode", preventing scammers from resetting the conversation flow.
+- **🔍 Hardened Extraction**: A dual-layer pipeline (Deterministic Regex + LLM Verification) with **normalization** and **disambiguation** to ensure phone numbers aren't misclassified as bank accounts.
+- **⚡ Gemini 2.5 Flash**: Optimized for speed and low latency, enabling near real-time responses.
+- **📊 Live Dashboard**: Real-time visualization of ongoing engagements, extracted entities, and scam topologies.
 
-### 1.1 High-Level Data Flow
+## 🏗️ System Architecture
 
-The following diagram illustrates the request lifecycle through the agent orchestration layer:
+The system is architected as a stateful graph using **LangGraph**, enabling cyclic and self-correcting agentic behaviors.
 
 ```mermaid
 graph TD
-    UserRequest[Incoming Message API] --> StateInit[State Initialization]
+    UserRequest[Incoming Message] --> StateInit[State Initialization]
     StateInit --> Detection[Scam Detection Agent]
 
     subgraph Agentic Orchestration [LangGraph Workflow]
         Detection --> Planner{Planner Agent}
 
-        Planner -->|Strategy: ENGAGE| Persona[Persona Engagement Agent]
+        Planner -->|Strategy: STALL| Persona[Persona Agent]
+        Planner -->|Strategy: EXTRACT| Persona
         Planner -->|Strategy: JUDGE| Judge[Agentic Judge]
         Planner -->|Strategy: END| Formatter[Response Formatter]
 
-        Persona -->|Generate Response| Simulator[Internal Simulator / Live]
-        Simulator --> Extractor[Intelligence Extraction Agent]
+        Persona -->|Generate Response| FactCheck[Fact Checker]
+        FactCheck -->|Approved| Simulator[Simulator/Live]
+
+        Simulator --> Extractor[Intelligence Extraction]
         Extractor -->|Update State| Planner
 
         Judge -->|Verdict| Formatter
@@ -31,134 +39,87 @@ graph TD
 
     Formatter --> Response[Final API Response]
 
-    subgraph Persistent Memory [Neon PostgreSQL + pgvector]
-        Postgres[(Neon PostgreSQL)] <-->|Load/Save Context| StateInit
-        Postgres <-->|Persist Intelligence| Extractor
+    subgraph Persistent Memory [Neon PostgreSQL]
+        Postgres[(Neon DB)] <-->|Vector Store| StateInit
+        Postgres <-->|Save Intel| Extractor
     end
 ```
 
-## 2. Orchestration & Control Flow
+### Core Agents
 
-The core of the system is `graph/workflow.py`, which defines the `HoneypotState`. This shared state object flows through all nodes in the graph, ensuring every agent has access to the full conversation context, extracted entities, and current strategic objectives.
+1.  **Planner Agent (`agents/planner.py`)**:
+    - Decides **WHEN** to act.
+    - Enforces the "Stall then Extract" pacing.
+    - Prevents early exits before Turn 5.
+2.  **Persona Agent (`agents/persona_engagement.py`)**:
+    - Decides **HOW** to act.
+    - Adopts the "Curious but Cautious" tone.
+    - Uses `strategy_hint` inputs (e.g., "STALL: Feign confusion") to guide responses.
 
-### 2.1 The Planner Agent (The Brain)
+3.  **Intelligence Extraction Agent (`agents/intelligence_extraction.py`)**:
+    - Mines entities from every message.
+    - **New**: Includes `normalize_phone_number` and `disambiguate_entities` to clean data.
 
-Instead of hard-coded logic, the flow is controlled by the **Planner Agent** (`agents/planner.py`). This LLM-based router evaluates the current state of the conversation and decides the next move:
+4.  **Fact Checker (`agents/fact_checker.py`)**:
+    - Ensures the Persona's claims are consistent with the generated profile (e.g., age, location).
 
-- **ENGAGE**: If the scammer is still hooked, the planner instructs the Persona agent to continue.
-- **JUDGE**: If sufficient evidence is collected or the maximum turn limit (`MAX_ENGAGEMENT_TURNS`) is reached, it routes to the Judge.
-- **END**: If the message is determined to be benign.
+## 🛠️ Technology Stack
 
-### 2.2 PostgreSQL Memory Integration
-
-Long-term persistence is handled by `memory/postgres_memory.py`. We utilize **PostgreSQL and pgvector** to:
-
-1.  **Context Loading**: Before processing starts, prior conversation history and extracted entities are loaded into the `HoneypotState`.
-2.  **Entity Persistence**: Extracted bank accounts and UPI IDs are stored in structured tables with vector embeddings, allowing for cross-conversation correlations.
-
-## 3. Agent Implementation Details
-
-Each agent is designed with a single responsibility principle, located in `agents/`.
-
-### 3.1 Scam Detection Agent (`agents/scam_detection.py`)
-
-- **Input**: Raw user message.
-- **Logic**: Uses OpenAI to classify the message against 8 known scam topologies (e.g., `BANK_IMPERSONATION`, `UPI_FRAUD`).
-- **Output**: Confidence score and specific scam indicators.
-
-### 3.2 Persona Engagement Agent (`agents/persona_engagement.py`)
-
-- **Dynamic Generation**: Unlike static templates, this agent dynamically generates a victim profile (Name, Age, Occupation, Psychology) tailored to the specific scam type. For example, a bank scam might trigger a "Technologically illiterate retired clerk" persona.
-- **Behavioral Engine**: The agent adheres to a strict "Show, Don't Tell" prompt policy, ensuring naturalistic typing errors, hesitation, and emotional reactions to build trust with the scammer.
-
-### 3.3 Intelligence Extraction Agent (`agents/intelligence_extraction.py`)
-
-- **Role**: Silent observer.
-- **Operation**: After every exchange, it parses the dialogue to identify patterns matching high-value entities (IBANs, UPI IDs, URLs).
-- **Safety**: Uses safe JSON parsing with fallback mechanisms to ensure extraction failures do not crash the workflow.
-
-### 3.4 Agentic Judge (`agents/judge.py`)
-
-- **Role**: The final arbiter.
-- **Logic**: It does not rely on the detection score alone. It reviews the entire transcript and evidence dossier to render a verdict (`GUILTY`, `INNOCENT`, `SUSPICIOUS`) with a written reasoning block.
-
-## 4. Codebase Structure
-
-The repository follows a strict Clean Architecture pattern:
-
-- **`agents/`**: Domain logic. Each agent is an independent module with its own prompt definitions and processing logic.
-- **`graph/`**: Orchestration layer. Defines the State schema and Language Graph topology.
-- **`memory/`**: Data access layer. Handles all interactions with Neon PostgreSQL and pgvector for persistent state and semantic search.
-- **`models/`**: Data definitions. Pydantic schemas for API requests/responses ensuring type safety.
-- **`utils/`**: Shared infrastructure.
-  - `llm_client.py`: Wrapper for model interactions (OpenAI).
-  - `logger.py`: Centralized, structured logging for observability.
-  - `scam_simulator.py`: Internal deterministic simulator for robust testing without external dependencies.
-
-## 5. Technology Stack
-
-- **Runtime**: Python 3.10+
-- **Orchestration**: LangGraph (LangChain ecosystem)
-- **LLM Provider**: OpenAI `gpt-4o-mini` (Selected for latency/cost efficiency)
-- **Memory Store**: Neon PostgreSQL with `pgvector` extension
-- **API Framework**: FastAPI
+- **LLM**: Google Gemini 2.5 Flash
+- **Orchestration**: LangGraph
+- **Backend**: FastAPI (Python 3.10+)
+- **Database**: Neon PostgreSQL + pgvector
+- **Search**: Serper API (for fact-checking)
 - **Validation**: Pydantic
 
-## 6. Setup & Deployment
+## 📦 Setup & Deployment
 
-### 6.1 Environment Configuration
+### 1. Environment Variables
 
-The system requires strictly defined environment variables for security and operational control. Create a `.env` file:
+Create a `.env` file:
 
 ```bash
-# Core AI Configuration
-OPENAI_API_KEY=sk-...         # OpenAI API Key
-OPENAI_MODEL=gpt-4o-mini      # Recommended model for logic/cost balance
+# Gemini API
+GEMINI_API_KEY=AIza...
+PLANNER_MODEL=gemini-2.5-flash
 
-# Memory Infrastructure
-DATABASE_URL=postgres://...     # Neon PostgreSQL connection string
-POSTGRES_ENABLED=true           # Master toggle for memory features
+# Memory
+DATABASE_URL=postgres://...
+POSTGRES_ENABLED=true
 
-# Deployment Security
-API_SECRET_KEY=...            # Key for x-api-key header authentication
+# Security
+API_SECRET_KEY=your_secret_key
 
-# Operational Parameters
-MAX_ENGAGEMENT_TURNS=10       # Safety limit for autonomous loops
-SCAM_DETECTION_THRESHOLD=0.6  # Confidence cutoff for engagement
-LOG_LEVEL=INFO                # Logging verbosity
+# Operational
+MAX_ENGAGEMENT_TURNS=10
+SCAM_DETECTION_THRESHOLD=0.6
 ```
 
-### 6.2 Execution
+### 2. Installation
 
-1.  install dependencies:
-    ```bash
-    pip install -r requirements.txt
-    ```
-2.  Launch the production server:
-    ```bash
-    python main.py
-    ```
-    The server listens on `0.0.0.0:8000`.
+```bash
+pip install -r requirements.txt
+```
 
-## 7. API Reference
+### 3. Run Server
 
-### Analyze & Engage
+```bash
+python main.py
+```
+
+The server will start on `0.0.0.0:8000`.
+
+## 📡 API Reference
 
 **POST** `/analyze`
 
-This endpoint triggers the full agentic workflow.
-
-**Request**:
-
 ```json
 {
-  "message": "Immediate attention required! Your KYC is expired.",
-  "conversation_id": "aa-bb-cc-dd",
-  "mode": "simulation"
+  "message": "Urgent! Your SBI account is blocked. Verify KYC immediately.",
+  "conversation_id": "session-123",
+  "mode": "simulation" // or "live"
 }
 ```
-
-- `mode`: `simulation` runs the internal simulator loop. `live` processes a single turn for real-time chat integrations.
 
 **Response**:
 
@@ -166,11 +127,19 @@ This endpoint triggers the full agentic workflow.
 {
   "scam_detected": true,
   "scam_type": "BANK_IMPERSONATION",
-  "confidence_score": 0.98,
+  "strategy_hint": "STALL: Ask for official ID",
   "extracted_entities": {
-    "upi_ids": ["fraud@upi"],
-    "phishing_urls": ["http://fake-link.com"]
+    "phone_numbers": ["9876543210"],
+    "bank_accounts": []
   },
-  "reply": "I am worried, what should I do?"
+  "reply": "I am very worried. Can you please send me your employee ID first?"
 }
 ```
+
+---
+
+## 📝 GitHub Description
+
+_(Copy and paste this into your GitHub repository "About" section)_
+
+> **Neepot AI**: An agentic scambaiting system powered by Gemini 2.5 Flash and LangGraph. Features autonomous persona generation, strategic stalling (5-turn min), and hardened intelligence extraction to waste scammers' time and mine actionable data.
