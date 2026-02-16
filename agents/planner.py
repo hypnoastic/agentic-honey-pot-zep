@@ -265,12 +265,17 @@ def _determine_verdict(state: Dict,
         verdict = "SUSPICIOUS"
         confidence = min(confidence, 0.79)
 
+    # Detailed red-flag reporting for better user feedback
+    flag_details = ", ".join(indicators[:3]) if indicators else "None specific"
+    behavior_signals = state.get("behavioral_signals", [])
+    behavior_details = ", ".join(behavior_signals[:2]) if behavior_signals else "None specific"
+
     reasoning = (
-        f"Hardened Confidence {confidence:.2f} | "
-        f"Detection: {scam_detected} ({scam_type}) | "
-        f"Yield: {high_value} | "
-        f"Diversity: {distinct_types} | "
-        f"Indicators: {len(indicators)}"
+        f"VERDICT: {verdict} (Confidence: {confidence:.2f})\n"
+        f"TYPE: {scam_type}\n"
+        f"RED FLAGS: {flag_details}\n"
+        f"BEHAVIOR: {behavior_details}\n"
+        f"YIELD: {high_value} entities ({distinct_types} types)"
     )
 
     return verdict, confidence, reasoning

@@ -100,6 +100,20 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 
 
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """
+    Global safety net. Ensures API never crashes and returns valid JSON.
+    """
+    import traceback
+    error_details = traceback.format_exc()
+    logger.critical(f"UNHANDLED EXCEPTION: {exc}\n{error_details}")
+    
+    from utils.safe_response import create_fallback_response
+    return create_fallback_response(f"Internal System Error: {str(exc)}")
+
+
 async def verify_api_key(x_api_key: Optional[str] = Header(None, description="API Key for authentication")):
     """
     Dependency to verify the x-api-key header.
