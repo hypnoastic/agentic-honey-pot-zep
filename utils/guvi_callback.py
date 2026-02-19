@@ -18,6 +18,7 @@ async def send_guvi_callback(
     session_id: str,
     scam_detected: bool,
     total_messages: int,
+    engagement_duration_seconds: float,
     extracted_intelligence: Dict[str, List[str]],
     agent_notes: str,
     scam_indicators: Optional[List[str]] = None
@@ -35,6 +36,7 @@ async def send_guvi_callback(
         session_id: Unique session ID from the platform
         scam_detected: Whether scam intent was confirmed
         total_messages: Total messages exchanged in the session
+        engagement_duration_seconds: Total duration of the engagement
         extracted_intelligence: Dictionary with extracted entities
         agent_notes: Summary of scammer behavior
         scam_indicators: List of suspicious keywords/patterns found
@@ -53,15 +55,19 @@ async def send_guvi_callback(
         "sessionId": session_id,
         "scamDetected": scam_detected,
         "totalMessagesExchanged": total_messages,
+        "engagementDurationSeconds": engagement_duration_seconds,
         "extractedIntelligence": {
+            "phoneNumbers": flatten(extracted_intelligence.get("phone_numbers", [])),
             "bankAccounts": flatten(extracted_intelligence.get("bank_accounts", [])),
             "upiIds": flatten(extracted_intelligence.get("upi_ids", [])),
             "phishingLinks": flatten(extracted_intelligence.get("phishing_urls", [])),
-            "phoneNumbers": flatten(extracted_intelligence.get("phone_numbers", [])),
             "emailAddresses": flatten(extracted_intelligence.get("email_addresses", [])),
-            "suspiciousKeywords": scam_indicators or flatten(extracted_intelligence.get("keywords", []))
+            "caseIds": flatten(extracted_intelligence.get("case_ids", [])),
+            "policyNumbers": flatten(extracted_intelligence.get("policy_numbers", [])),
+            "orderNumbers": flatten(extracted_intelligence.get("order_numbers", []))
         },
-        "agentNotes": agent_notes
+        "agentNotes": agent_notes,
+        "scamIndicators": scam_indicators or flatten(extracted_intelligence.get("keywords", []))
     }
     
     # Log full payload for debugging

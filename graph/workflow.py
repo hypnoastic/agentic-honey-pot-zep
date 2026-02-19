@@ -280,12 +280,17 @@ async def _trigger_guvi_callback_with_retry(state: Dict[str, Any], conversation_
         conversation_summary=state.get("conversation_summary", "")
     )
     
+    import time
+    start_time = state.get("engagement_start_time", time.time())
+    duration_seconds = max(0.0, round(time.time() - start_time, 1))
+    
     for attempt in range(max_retries):
         try:
             success = await send_guvi_callback(
                 session_id=conversation_id,
                 scam_detected=state.get("scam_detected", True),
                 total_messages=len(state.get("conversation_history", [])) + state.get("engagement_count", 0) + 1,
+                engagement_duration_seconds=duration_seconds,
                 extracted_intelligence=entities,
                 agent_notes=notes,
                 scam_indicators=state.get("scam_indicators", []) + state.get("behavioral_signals", [])
