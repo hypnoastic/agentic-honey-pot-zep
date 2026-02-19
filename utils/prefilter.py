@@ -101,18 +101,19 @@ ENTITY_PATTERNS: Dict[str, List[str]] = {
         r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",
     ],
     "case_ids": [
-        r"(?i)\b(?:case|complaint|ticket|ref|reference)\s*(?:no\.?|number|id|#)?\s*([A-Z0-9\-]{4,20})\b",
-        r"(?i)\bCASE[-/]?(\d{4,15})\b",
+        r"(?i)\b(?:case|complaint|ticket)\s*(?:no\.?|number|id|#|ref(?:erence)?)\s*(?:is|:)?\s*([A-Z0-9][A-Z0-9\-]{3,24})",
+        r"(?i)\b(?:ref(?:erence)?)\s*(?:no\.?|number|id|#)?\s*(?:is|:)?\s*([A-Z0-9](?=[A-Z0-9\-]*\d)[A-Z0-9\-]{3,24})",
+        r"(?i)\b(?:SBI|REF|CASE)[-/](\d{4,15})\b",
         r"(?i)\bCRN[-/]?(\d{6,15})\b",
     ],
     "policy_numbers": [
-        r"(?i)\b(?:policy|pol\.?)\s*(?:no\.?|number|#)?\s*([A-Z0-9\-]{5,20})\b",
-        r"(?i)\b(LIC|SBI|HDFC|ICICI|BAJAJ|MAX|TATA)[-/]?(\d{8,14})\b",
+        r"(?i)\bpolicy\s*(?:no\.?|number|#)?\s*(?:is|:)?\s*([A-Z0-9][A-Z0-9\-]{4,24})\b",
+        r"(?i)\b(LIC\d{8,14})\b",
         r"\b\d{6,9}[-/]\d{2,3}[-/]\d{2,5}\b",
     ],
     "order_numbers": [
-        r"(?i)\b(?:order|ord\.?)\s*(?:no\.?|number|id|#)?\s*([A-Z0-9\-]{5,20})\b",
-        r"(?i)\b(OD|ORD|INV|TXN|REF|ORDER)[-/]?(\d{8,15})\b",
+        r"(?i)\bord(?:er)?\s*(?:no\.?|number|id|ref(?:erence)?)?\s*(?:is|:)?\s*([A-Z0-9][A-Z0-9\-]{4,24})\b",
+        r"(?i)\b(OD|ORD|INV|TXN)[-/](\d{8,15})\b",
         r"\b\d{3}[-\s]\d{7}[-\s]\d{7}\b",
     ],
 }
@@ -212,6 +213,10 @@ def extract_entities_deterministic(text: str) -> Dict[str, List[Dict[str, Any]]]
                 continue
             if entity_type == "phone_numbers" and len(re.sub(r'\D', '', clean_match)) < 10:
                 continue
+            if entity_type in ("case_ids", "policy_numbers", "order_numbers"):
+                # Must contain at least one digit and be >= 4 chars
+                if len(clean_match) < 4 or not any(c.isdigit() for c in clean_match):
+                    continue
                 
             entity_list.append({
                 "value": clean_match,

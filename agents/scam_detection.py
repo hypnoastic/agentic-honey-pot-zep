@@ -1,10 +1,6 @@
 """
-Scam Detection Agent (Production Grade)
-- Gemini Flash optimized
-- Deterministic + validated outputs
-- Fact-check integrated
-- Category whitelist enforced
-- Confidence clamped + guarded
+Scam Detection Agent
+Analyzes message intent using optimized LLM prompts and category enforcement.
 """
 
 import logging
@@ -15,9 +11,7 @@ from utils.parsing import parse_json_safely
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
-# =========================================================
-# VALID SCAM TYPES (Whitelist Enforcement)
-# =========================================================
+# Scam Type Configuration
 
 VALID_SCAM_TYPES = {
     "LOTTERY_FRAUD",

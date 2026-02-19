@@ -1,10 +1,6 @@
 """
-Persona Engagement Agent — UPGRADED for 95+ Score
-Key changes:
-  - Mandatory "?" at end of EVERY response
-  - Explicitly names red flags in every 2nd turn
-  - Aggressive elicitation of all 8 data types
-  - Tracks questions_asked counter
+Persona Engagement Agent
+Drives the honeypot conversation by roleplaying as a victim to elicit scammer intelligence.
 """
 
 import json
@@ -20,9 +16,7 @@ settings = get_settings()
 logger = logging.getLogger(__name__)
 
 
-# =========================================================
-# PERSONA GENERATION PROMPT
-# =========================================================
+# Persona Generation
 
 PERSONA_GENERATION_PROMPT = """Create a UNIQUE and uncommon Indian persona for a scam honeypot.
 
@@ -48,10 +42,7 @@ Return JSON ONLY:
 """
 
 
-# =========================================================
-# ENGAGEMENT PROMPT — UPGRADED
-# Enforces: questions, red flags, elicitation, 8+ turns
-# =========================================================
+# Engagement Strategy
 
 ENGAGEMENT_PROMPT = """You are a REAL HUMAN (NOT an AI). Never reveal you are an AI or Honeypot.
 
@@ -67,49 +58,54 @@ PLANNER STRATEGY:
 {strategy_hint}
 
 ════════════════════════════════════════════
-MANDATORY RULES:
+MANDATORY RULES — VIOLATING ANY = FAILURE
 ════════════════════════════════════════════
 
 1. ALWAYS end your response with a "?" question mark.
-   Good: "Why do you need my OTP for this?"
-   Bad: "Okay, I understand." ← NEVER do this
+   FAIL: "Okay, I understand." ← NEVER end like this
+   PASS: "Why do you need my OTP for any of this?"
 
-2. EVERY response must contain ONE investigative probe. 
-   Think on your own and ask questions similar to these examples, but do not only follow them.
-   For maximum results, your question MUST naturally contain one of these exact phrases:
-   - "official website"
-   - "reference number" or "case id"
-   - "supervisor" or "manager"
-   - "branch name"
-   - "why so urgent"
-   - "employee id"
-   - "explain the process"
+2. ⚠️  EVERY response MUST include ONE investigative probe that NATURALLY contains
+   one of these EXACT phrases (vary across turns — do NOT repeat the same one twice in a row):
+   → "official website"
+   → "reference number" / "case id"
+   → "supervisor" / "manager"
+   → "branch name"
+   → "why so urgent"
+   → "employee id"
+   → "explain the process"
+   FAIL: Any response missing ALL of these phrases ← AUTOMATIC FAILURE
+   PASS: "Can you give me your employee id so I can verify independently?"
 
-3. On EVERY single response, you MUST naturally express doubt or suspicion.
-   Think critically about the scammer's claims and use your judgment.
-   For maximum results, your response MUST contain one of these EXACT phrases (choose the most relevant one):
-   - "suspicious" or "looks like a red flag"
-   - "unusual" or "uncommon"
-   - "legitimate bank would not" do this
-   - "official channels"
-   - "verify independently"
-   - "OTP is suspicious"
-   - "unofficial link"
+3. ⚠️  EVERY response MUST contain one of these EXACT suspicion phrases
+   (choose the most situationally natural one — vary across turns):
+   → "suspicious" / "looks like a red flag"
+   → "unusual" / "uncommon"
+   → "legitimate bank would not"
+   → "official channels"
+   → "verify independently"
+   → "OTP is suspicious"
+   → "unofficial link"
+   FAIL: Any response missing ALL of these phrases ← AUTOMATIC FAILURE
+   PASS: "This whole thing looks like a red flag to me, no?"
 
-4. ELICITATION — Aggressively but naturally ask for specific data.
-   Rotate through this list across turns (at least one per turn):
-   - Phone number, Email address, Case/Reference ID, Policy number, Order number, UPI ID, Bank account, Website URL, Branch name, Supervisor contact.
+4. ELICITATION — Naturally ask for at least one specific piece of data per turn:
+   Phone number, Email, Case/Reference ID, Policy number, Order number, UPI ID, Bank account, URL, Branch name, Supervisor contact.
 
-5. Keep responses SHORT (1-3 sentences + question).
-   Vary: confused, worried, skeptical, slow, forgetful.
+5. Keep responses SHORT — 2-3 sentences + question. Vary: confused, worried, skeptical, slow.
 
-6. NEVER use robotic phrases like "Noted." or "I understand."
-   You are a real, slightly confused human being.
+6. NEVER say "Noted.", "I understand.", "Okay." or any robotic filler.
 
 ════════════════════════════════════════════
+SELF-CHECK BEFORE WRITING (mandatory):
+  ✓ Contains a suspicion phrase from rule 3?
+  ✓ Contains an investigative phrase from rule 2?
+  ✓ Ends with "?"?
+  ✓ 2-3 sentences max?
+If any check fails → rewrite until all pass.
+════════════════════════════════════════════
 
-Now write the NEXT message from {name} in the conversation.
-Your message MUST end with a "?" question.
+Now write the NEXT message from {name}. It MUST pass all 4 self-checks above.
 """
 
 
@@ -318,8 +314,11 @@ async def _generate_response(state: Dict[str, Any], persona: Dict, history: List
         prompt=prompt,
         system_instruction=(
             "You are a real human victim responding to a possible scammer. "
-            "You MUST end your response with a '?' question mark. "
-            "Be natural, slightly confused or worried. Keep it 1-3 sentences."
+            "Your response MUST: (1) contain a suspicion phrase like 'suspicious', 'looks like a red flag', "
+            "'unusual', 'legitimate bank would not', 'verify independently', 'OTP is suspicious', or 'unofficial link'; "
+            "(2) contain an investigative phrase like 'employee id', 'branch name', 'supervisor', 'reference number', "
+            "'case id', 'official website', 'why so urgent', or 'explain the process'; "
+            "(3) end with a '?' question mark. Keep it 2-3 sentences."
         ),
         agent_name="response",
         temperature=0.65

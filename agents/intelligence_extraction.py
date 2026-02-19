@@ -1,10 +1,6 @@
 """
-Intelligence Extraction Agent — UPGRADED PIPELINE
-Fixes:
-  1. Scans FULL conversation history (not just latest message)
-  2. Extracts all 8 entity types required by scoring rubric
-  3. Set-based deduplication eliminates duplicate values
-  4. Hardened anti-hallucination via LLM verification
+Intelligence Extraction Agent
+Extracts and verifies entities from conversation history using Regex and LLM.
 """
 
 import re
@@ -25,9 +21,7 @@ settings = get_settings()
 logger = logging.getLogger(__name__)
 
 
-# =============================================================================
-# ALL 8 ENTITY TYPES  (must match scoring rubric)
-# =============================================================================
+# Required Entity Types
 
 EXPECTED_ENTITY_KEYS = {
     "upi_ids",
@@ -87,9 +81,7 @@ Return ONLY valid JSON (no prose, no markdown):
 """
 
 
-# =============================================================================
-# MAIN AGENT
-# =============================================================================
+# Extraction Implementation
 
 async def intelligence_extraction_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -161,20 +153,13 @@ async def intelligence_extraction_agent(state: Dict[str, Any]) -> Dict[str, Any]
             new_llm_entities, full_corpus + "\n" + combined_text
         )
 
-        # LLM IS AUTHORITATIVE for cleaning, but we RECOVER high-confidence
-        # structured entities that the LLM might have missed as "noise".
-        # (Email, Phone, UPI, URL, IFSC are highly unlikely to be noise labels)
-        recovered_entities = {}
-        RECOVERY_KEYS = {"email_addresses", "phone_numbers", "upi_ids", "phishing_urls", "ifsc_codes"}
-        
-        # Verify regex candidates against text one more time before recovery
-        v_regex = _validate_llm_output_against_text(new_regex_entities, full_corpus + "\n" + combined_text)
-        
-        for key in RECOVERY_KEYS:
-            llm_vals = {str(i.get("value", i)).lower() for i in new_llm_entities.get(key, [])}
-            for candidate in v_regex.get(key, []):
-                val = str(candidate.get("value", candidate)).lower()
-                if val not in llm_vals:
+        # FULL RECOVERY: always merge regex entities -- regex already ran on the
+        # full validated corpus so no further text check is needed.
+        for key in EXPECTED_ENTITY_KEYS:
+            llm_vals = {str(i.get("value", i) if isinstance(i, dict) else i).lower() for i in new_llm_entities.get(key, [])}
+            for candidate in new_regex_entities.get(key, []):
+                val = str(candidate.get("value", candidate) if isinstance(candidate, dict) else candidate).lower()
+                if val and val not in llm_vals:
                     new_llm_entities[key].append(candidate)
 
         combined_new_entities = new_llm_entities
@@ -268,17 +253,15 @@ def _validate_llm_output_against_text(
     for entity_type, items in llm_entities.items():
         validated[entity_type] = []
         for item in items:
-            if isinstance(item, str):
-                value = item
-            else:
-                value = str(item.get("value", ""))
-            if not value:
+            value = str(item.get("value", "")) if isinstance(item, dict) else str(item)
+            if not value: continue
+            
+            # Stricter check: must contain a digit if it's a short ID-like string
+            if entity_type in ["case_ids", "policy_numbers", "order_numbers"] and len(value) < 10 and not any(c.isdigit() for c in value):
                 continue
-            normalized_value = value.replace(" ", "").lower()
-            if (
-                normalized_value in normalized_source
-                or normalized_value.replace("0", "o") in normalized_source
-            ):
+                
+            norm_val = value.replace(" ", "").lower()
+            if (norm_val in normalized_source or norm_val.replace("0", "o") in normalized_source):
                 validated[entity_type].append(item)
     return validated
 
@@ -292,8 +275,15 @@ def _normalize_entities(entities: Dict) -> Dict:
             if isinstance(item, dict):
                 raw_val = item.get("value", "")
                 norm_val = normalize_entity_value(raw_val, key)
-                item["value"] = norm_val
-                normalized[key].append(item)
+                if norm_val:
+                    item["value"] = norm_val
+                    normalized[key].append(item)
+            else:
+                # Handle plain string entities (e.g., from LLM response)
+                raw_val = str(item).strip()
+                norm_val = normalize_entity_value(raw_val, key)
+                if norm_val:
+                    normalized[key].append({"value": norm_val, "confidence": 0.9, "source": "llm"})
     return disambiguate_entities(normalized)
 
 

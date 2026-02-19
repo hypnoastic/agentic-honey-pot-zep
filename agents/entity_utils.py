@@ -31,11 +31,35 @@ def normalize_entity_value(value: str, entity_type: str) -> str:
         return re.sub(r"\D", "", clean_value)
     
     if entity_type in ["case_ids", "policy_numbers", "order_numbers"]:
-        # Strip common labels like "Case ID: ", "Reference Number ", etc.
-        # Also clean leading/trailing non-alphanumeric characters often left by regex/LLM
-        clean_val = re.sub(r'(?i)^(?:case|complaint|ticket|ref|reference|policy|pol|order|ord|inv|txn)\s*(?:no\.?|number|id|#)?\s*', '', clean_value)
-        clean_val = re.sub(r'^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$', '', clean_val)
-        return clean_val.upper()
+        # Strip common labels but LEAVE the actual ID structure intact
+        # Don't force uppercase, allow hyphens
+        clean_val = clean_value
+        
+        # Only strip labels if they are at the very beginning and followed by a space/colon/hyphen
+        clean_val = re.sub(r'(?i)^(?:case|complaint|ticket|ref|reference|policy|pol|order|ord|inv|txn)\s*(?:no\.?|number|id|#)?[:\-\s]+', '', clean_val)
+        
+        # Clean external non-alphanumeric except hyphens
+        clean_val = re.sub(r'^[^a-zA-Z0-9]+|[^a-zA-Z0-9\-]+$', '', clean_val)
+        
+        # Block common extraction noise words (case-insensitive check)
+        NOISE_WORDS = {
+            "ERENCE", "BENEFITS", "NUMBER", "ERENCES", "DETAILS", "PROCESS", 
+            "PENDING", "VALUE", "STATUS", "REFERENCE", "TYPE", "INFORMATION", 
+            "CONFIRMATION", "SUPPORT", "REFID", "CASEID", "ORDERID", "POLICYID",
+            "REFNO", "CASENO", "ORDERNO", "POLICYNO", "REFNUMBER", "CASENUMBER",
+            "ORDERNUMBER", "POLICYNUMBER", "REF_ID", "CASE_ID", "ORDER_ID", "POLICY_ID",
+            "ID", "IDS", "CODE", "CODES", "NUM", "NUMS", "EXTRACT", "VERIFY",
+            "DATA", "INFO", "USER", "CUSTOMER", "CLIENT", "AGENT", "ADMIN",
+            "TRANS", "TRANSACTION", "PAYMENT", "AMOUNT", "BILL", "RECEIPT", "INVOICE"
+        }
+        
+        if clean_val.upper() in NOISE_WORDS:
+            return ""
+            
+        if len(clean_val) < 4 and not any(c.isdigit() for c in clean_val):
+            return ""
+            
+        return clean_val
         
     return clean_value
 

@@ -62,22 +62,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.middleware("http")
-async def log_404_headers(request: Request, call_next):
-    """Debug middleware to log headers for failed requests."""
-    response = await call_next(request)
-    if response.status_code == 404 and "ws" in request.url.path:
-        logger.error(f"--- 404 DEBUG START ---")
-        logger.error(f"Path: {request.url.path}")
-        logger.error(f"Scope Type: {request.scope.get('type')}")
-        logger.error(f"X-Nginx-Match: {request.headers.get('x-nginx-match')}")
-        logger.error(f"X-Debug-Input-Upgrade: {request.headers.get('x-debug-input-upgrade')}")
-        logger.error(f"Connection: {request.headers.get('connection')}")
-        logger.error(f"Upgrade: {request.headers.get('upgrade')}")
-        logger.error(f"All Headers: {dict(request.headers)}")
-        logger.error(f"--- 404 DEBUG END ---")
-    return response
-
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
@@ -212,16 +196,7 @@ async def analyze_message(
             logger.warning(f"[{request_id}] Empty message received")
             return create_fallback_response("Message cannot be empty")
         
-        # Log full detailed message now that we have safely parsed it
-        logger.info(f"[{request_id}] HEADERS: {raw_request.headers}")
-        
-        # Use AgentLogger for colored input
-        from utils.logger import AgentLogger
-        # Passing dummy icon "📥" (ignored by logger) to correctly map title and details
-        # Merging message into title to ensure the whole line is colored orange
-        AgentLogger._print_colored(f"{request_id}", "orange", "📥", f"ANALYZING MESSAGE BODY: {message}")
-        
-        # 3. Extract conversation history for multi-turn support (Section 6.2)
+        # 3. Extract conversation history for multi-turn support
         conversation_history = []
         for msg in (request.conversation_history or []):
             conversation_history.append({

@@ -1,145 +1,108 @@
-# Neepot AI: Agentic Honey-Pot System
+# Honeypot API
 
-**Neepot AI** is an advanced, autonomous scambaiting system designed to detect, stall, and extract high-value intelligence from cyber-scammers. Powered by **Google Gemini 2.5 Flash** and **LangGraph**, it deploys a team of specialized agents that collaborate to waste scammers' time while mining actionable data (Bank Accounts, UPI IDs, Phishing Links).
+## Description
 
-## 🚀 Key Features
+An autonomous scambaiting system that detects inbound scam messages, deploys an adaptive victim persona to stall and engage the scammer, and extracts actionable intelligence (UPI IDs, bank accounts, phishing URLs, case IDs, etc.) across multi-turn conversations. The system uses a LangGraph agentic graph with specialized agents for detection, persona generation, intelligent planning, fact-checking, and entity extraction.
 
-- **🧠 Strategic Planner**: The "Brain" of the system. Enforces a **mandatory 5-turn minimum engagement** to build trust (STALL phase) before pivoting to aggressive data harvesting (EXTRACT phase).
-- **🎭 Adaptive Persona**: Dynamically generates victim profiles (e.g., "confused elderly person", "anxious student") to match the specific scam topology.
-- **🛡️ Sticky Detection**: Once a scam is detected, the system locks into "Honeypot Mode", preventing scammers from resetting the conversation flow.
-- **🔍 Hardened Extraction**: A dual-layer pipeline (Deterministic Regex + LLM Verification) with **normalization** and **disambiguation** to ensure phone numbers aren't misclassified as bank accounts.
-- **⚡ Gemini 2.5 Flash**: Optimized for speed and low latency, enabling near real-time responses.
-- **📊 Live Dashboard**: Real-time visualization of ongoing engagements, extracted entities, and scam topologies.
+## Tech Stack
 
-## 🏗️ System Architecture
+- **Language / Framework:** Python 3.11, FastAPI, LangGraph
+- **Key Libraries:** LangChain, Pydantic v2, asyncpg, httpx, uvicorn
+- **LLM / AI Models:** Google Gemini 2.5 Flash (planner, persona, extraction, detection)
+- **Memory:** Neon PostgreSQL (pgvector) for cross-session entity persistence
+- **Extraction:** Dual-layer pipeline — deterministic regex prefilter + LLM verification
 
-The system is architected as a stateful graph using **LangGraph**, enabling cyclic and self-correcting agentic behaviors.
+## Setup Instructions
 
-```mermaid
-graph TD
-    UserRequest[Incoming Message] --> StateInit[State Initialization]
-    StateInit --> Detection[Scam Detection Agent]
+1. **Clone the repository**
 
-    subgraph Agentic Orchestration [LangGraph Workflow]
-        Detection --> Planner{Planner Agent}
+   ```bash
+   git clone <repo-url>
+   cd agentic-honey-pot
+   ```
 
-        Planner -->|Strategy: STALL| Persona[Persona Agent]
-        Planner -->|Strategy: EXTRACT| Persona
-        Planner -->|Strategy: JUDGE| Judge[Agentic Judge]
-        Planner -->|Strategy: END| Formatter[Response Formatter]
+2. **Install dependencies**
 
-        Persona -->|Generate Response| FactCheck[Fact Checker]
-        FactCheck -->|Approved| Simulator[Simulator/Live]
+   ```bash
+   python -m venv .venv && source .venv/bin/activate
+   pip install -r requirements.txt
+   ```
 
-        Simulator --> Extractor[Intelligence Extraction]
-        Extractor -->|Update State| Planner
+3. **Set environment variables** — copy `.env.example` to `.env` and fill in:
 
-        Judge -->|Verdict| Formatter
-    end
+   ```bash
+   cp .env.example .env
+   # Edit .env with your keys:
+   # GEMINI_API_KEY, DATABASE_URL, API_SECRET_KEY
+   ```
 
-    Formatter --> Response[Final API Response]
+4. **Initialize the database** (first run only)
 
-    subgraph Persistent Memory [Neon PostgreSQL]
-        Postgres[(Neon DB)] <-->|Vector Store| StateInit
-        Postgres <-->|Save Intel| Extractor
-    end
-```
+   ```bash
+   python scripts/db_init.py
+   ```
 
-### Core Agents
+5. **Run the application**
+   ```bash
+   uvicorn main:app --host 0.0.0.0 --port 8000
+   ```
 
-1.  **Planner Agent (`agents/planner.py`)**:
-    - Decides **WHEN** to act.
-    - Enforces the "Stall then Extract" pacing.
-    - Prevents early exits before Turn 5.
-2.  **Persona Agent (`agents/persona_engagement.py`)**:
-    - Decides **HOW** to act.
-    - Adopts the "Curious but Cautious" tone.
-    - Uses `strategy_hint` inputs (e.g., "STALL: Feign confusion") to guide responses.
+## API Endpoint
 
-3.  **Intelligence Extraction Agent (`agents/intelligence_extraction.py`)**:
-    - Mines entities from every message.
-    - **New**: Includes `normalize_phone_number` and `disambiguate_entities` to clean data.
+- **URL:** `http://<your-server>/analyze`
+- **Method:** `POST`
+- **Authentication:** `x-api-key` header
 
-4.  **Fact Checker (`agents/fact_checker.py`)**:
-    - Ensures the Persona's claims are consistent with the generated profile (e.g., age, location).
-
-## 🛠️ Technology Stack
-
-- **LLM**: Google Gemini 2.5 Flash
-- **Orchestration**: LangGraph
-- **Backend**: FastAPI (Python 3.10+)
-- **Database**: Neon PostgreSQL + pgvector
-- **Search**: Serper API (for fact-checking)
-- **Validation**: Pydantic
-
-## 📦 Setup & Deployment
-
-### 1. Environment Variables
-
-Create a `.env` file:
-
-```bash
-# Gemini API
-GEMINI_API_KEY=AIza...
-PLANNER_MODEL=gemini-2.5-flash
-
-# Memory
-DATABASE_URL=postgres://...
-POSTGRES_ENABLED=true
-
-# Security
-API_SECRET_KEY=your_secret_key
-
-# Operational
-MAX_ENGAGEMENT_TURNS=10
-SCAM_DETECTION_THRESHOLD=0.6
-```
-
-### 2. Installation
-
-```bash
-pip install -r requirements.txt
-```
-
-### 3. Run Server
-
-```bash
-python main.py
-```
-
-The server will start on `0.0.0.0:8000`.
-
-## 📡 API Reference
-
-**POST** `/analyze`
+**Request:**
 
 ```json
 {
   "message": "Urgent! Your SBI account is blocked. Verify KYC immediately.",
-  "conversation_id": "session-123",
-  "mode": "simulation" // or "live"
+  "conversation_id": "session-abc123"
 }
 ```
 
-**Response**:
+**Response:**
 
 ```json
 {
-  "scam_detected": true,
-  "scam_type": "BANK_IMPERSONATION",
-  "strategy_hint": "STALL: Ask for official ID",
-  "extracted_entities": {
-    "phone_numbers": ["9876543210"],
-    "bank_accounts": []
+  "sessionId": "session-abc123",
+  "scamDetected": true,
+  "scamType": "BANK_IMPERSONATION",
+  "confidenceLevel": 0.95,
+  "extractedIntelligence": {
+    "phoneNumbers": ["9876543210"],
+    "upiIds": ["scammer@fakebank"],
+    "phishingLinks": ["http://fake-sbi-verify.ml/kyc"],
+    "bankAccounts": [],
+    "emailAddresses": [],
+    "caseIds": [],
+    "policyNumbers": [],
+    "orderNumbers": []
   },
-  "reply": "I am very worried. Can you please send me your employee ID first?"
+  "engagementDurationSeconds": 120,
+  "totalMessagesExchanged": 8,
+  "agentNotes": "Scammer impersonating SBI security department..."
 }
 ```
 
----
+## Approach
 
-## 📝 GitHub Description
+### Scam Detection
 
-_(Copy and paste this into your GitHub repository "About" section)_
+- A deterministic prefilter (`utils/prefilter.py`) scans every inbound message with pattern-matched rules covering UPI fraud, bank impersonation, phishing, lottery scams, and investment fraud — with weighted confidence scores.
+- If the prefilter score crosses the threshold, the Scam Detection Agent runs a full LLM analysis for nuanced classification.
 
-> **Neepot AI**: An agentic scambaiting system powered by Gemini 2.5 Flash and LangGraph. Features autonomous persona generation, strategic stalling (5-turn min), and hardened intelligence extraction to waste scammers' time and mine actionable data.
+### Intelligence Extraction
+
+- **Layer 1 (Regex):** A comprehensive set of named-capture regexes extracts UPI IDs, phone numbers, bank accounts, phishing URLs, emails, case IDs, policy numbers, and order numbers from the full conversation corpus.
+- **Layer 2 (LLM Verification):** The Gemini model verifies regex candidates against conversational context and recovers obfuscated entities.
+- **Recovery Merge:** All regex-found entities are merged with LLM results to ensure nothing is dropped.
+- Normalization and deduplication clean up the final entity set per type.
+
+### Engagement Maintenance
+
+- The **Planner Agent** decides per-turn whether to stall, extract deeper, or conclude — enforcing a minimum engagement window before ending.
+- The **Persona Agent** dynamically generates a culturally-grounded victim persona (elderly, retired, regional accent) and maintains it consistently across turns via Postgres memory.
+- A **Fact Checker** guards against persona inconsistencies, ensuring the honeypot response stays believable.
+- The system fires a final callback to the GUVI endpoint once engagement is complete with all extracted intelligence.
