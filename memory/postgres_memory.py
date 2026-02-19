@@ -126,7 +126,7 @@ async def _load_memory_impl(conn: asyncpg.Connection, conversation_id: str) -> D
             # Restore entities
             if "extracted_entities" in meta:
                 extracted = meta["extracted_entities"]
-                for k in ["bank_accounts", "upi_ids", "phishing_urls", "phone_numbers", "ifsc_codes"]:
+                for k in ["bank_accounts", "upi_ids", "phishing_urls", "phone_numbers", "ifsc_codes", "email_addresses", "case_ids", "policy_numbers", "order_numbers"]:
                     if k in extracted and isinstance(extracted[k], list):
                         current = memory_context["prior_entities"].get(k, [])
                         for item in extracted[k]:

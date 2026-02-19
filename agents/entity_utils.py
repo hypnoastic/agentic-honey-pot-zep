@@ -30,8 +30,12 @@ def normalize_entity_value(value: str, entity_type: str) -> str:
         # Remove all non-digits and spaces
         return re.sub(r"\D", "", clean_value)
     
-    if entity_type == "upi_ids":
-        return clean_value.lower()
+    if entity_type in ["case_ids", "policy_numbers", "order_numbers"]:
+        # Strip common labels like "Case ID: ", "Reference Number ", etc.
+        # Also clean leading/trailing non-alphanumeric characters often left by regex/LLM
+        clean_val = re.sub(r'(?i)^(?:case|complaint|ticket|ref|reference|policy|pol|order|ord|inv|txn)\s*(?:no\.?|number|id|#)?\s*', '', clean_value)
+        clean_val = re.sub(r'^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$', '', clean_val)
+        return clean_val.upper()
         
     return clean_value
 

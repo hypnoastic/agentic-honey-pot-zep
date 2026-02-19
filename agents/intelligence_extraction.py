@@ -62,6 +62,11 @@ Entity types to check (all 8):
 upi_ids, bank_accounts, phone_numbers, phishing_urls, email_addresses,
 case_ids, policy_numbers, order_numbers
 
+IMPORTANT: Scammers often provide fake support info. DO NOT discard entities
+just because they look fake or contain words like 'fraud', 'fake', or 'scam'.
+Capture them EXACTLY as they appear (or cleaned if labeled).
+If a regex candidate below looks valid, confirm it.
+
 Return ONLY valid JSON (no prose, no markdown):
 {{
   "verified_entities": {{
@@ -151,14 +156,32 @@ async def intelligence_extraction_agent(state: Dict[str, Any]) -> Dict[str, Any]
         new_llm_entities = _enforce_schema(new_llm_entities)
 
         # Anti-hallucination: validate every LLM entity is actually in the text
+        # (Allows slight normalization like stripping labels)
         new_llm_entities = _validate_llm_output_against_text(
             new_llm_entities, full_corpus + "\n" + combined_text
         )
 
-        combined_new_entities = merge_entities(new_regex_entities, new_llm_entities)
+        # LLM IS AUTHORITATIVE for cleaning, but we RECOVER high-confidence
+        # structured entities that the LLM might have missed as "noise".
+        # (Email, Phone, UPI, URL, IFSC are highly unlikely to be noise labels)
+        recovered_entities = {}
+        RECOVERY_KEYS = {"email_addresses", "phone_numbers", "upi_ids", "phishing_urls", "ifsc_codes"}
+        
+        # Verify regex candidates against text one more time before recovery
+        v_regex = _validate_llm_output_against_text(new_regex_entities, full_corpus + "\n" + combined_text)
+        
+        for key in RECOVERY_KEYS:
+            llm_vals = {str(i.get("value", i)).lower() for i in new_llm_entities.get(key, [])}
+            for candidate in v_regex.get(key, []):
+                val = str(candidate.get("value", candidate)).lower()
+                if val not in llm_vals:
+                    new_llm_entities[key].append(candidate)
+
+        combined_new_entities = new_llm_entities
 
     except Exception as e:
         logger.warning(f"LLM verification failed: {e}")
+        # Fallback to regex if LLM fails completely
         combined_new_entities = new_regex_entities
 
     # ── STEP 3: Normalize + Confidence Filter ────────────────────────────────

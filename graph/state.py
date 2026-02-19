@@ -4,7 +4,8 @@ Defines the shared state that flows through all agents.
 """
 
 import time
-from typing import TypedDict, List, Optional, Dict, Any
+from typing import TypedDict, List, Optional, Dict, Any, Annotated
+from agents.entity_utils import merge_entities
 
 
 class ConversationTurn(TypedDict):
@@ -46,7 +47,7 @@ class HoneypotState(TypedDict):
     engagement_start_time: float  # unix timestamp set at workflow start
 
     # Extracted Intelligence (all 8 types)
-    extracted_entities: Dict[str, List[str]]
+    extracted_entities: Annotated[Dict[str, List[Any]], merge_entities]
     extraction_complete: bool
 
     # Scoring

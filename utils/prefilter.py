@@ -101,19 +101,19 @@ ENTITY_PATTERNS: Dict[str, List[str]] = {
         r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",
     ],
     "case_ids": [
-        r"\b(?:case|complaint|ticket|ref|reference)\s*(?:no\.?|number|id|#)\s*[A-Z0-9\-]{4,20}\b",
-        r"\bCASE[-/]?\d{4,15}\b",
-        r"\bCRN[-/]?\d{6,15}\b",
+        r"(?i)\b(?:case|complaint|ticket|ref|reference)\s*(?:no\.?|number|id|#)?\s*([A-Z0-9\-]{4,20})\b",
+        r"(?i)\bCASE[-/]?(\d{4,15})\b",
+        r"(?i)\bCRN[-/]?(\d{6,15})\b",
     ],
     "policy_numbers": [
-        r"\b(?:policy|pol\.?)\s*(?:no\.?|number|#)\s*[A-Z0-9\-]{5,20}\b",
-        r"\b(?:LIC|SBI|HDFC|ICICI|BAJAJ|MAX|TATA)[-/]?\d{8,14}\b",
-        r"\b\d{6,9}[-/]\d{2,3}[-/]\d{2,5}\b",  # 123456789/01/001 style
+        r"(?i)\b(?:policy|pol\.?)\s*(?:no\.?|number|#)?\s*([A-Z0-9\-]{5,20})\b",
+        r"(?i)\b(LIC|SBI|HDFC|ICICI|BAJAJ|MAX|TATA)[-/]?(\d{8,14})\b",
+        r"\b\d{6,9}[-/]\d{2,3}[-/]\d{2,5}\b",
     ],
     "order_numbers": [
-        r"\b(?:order|ord\.?)\s*(?:no\.?|number|id|#)\s*[A-Z0-9\-]{5,20}\b",
-        r"\b(?:OD|ORD|INV|TXN|REF)\d{8,15}\b",
-        r"\b\d{3}[-\s]\d{7}[-\s]\d{7}\b",  # Amazon-style order numbers
+        r"(?i)\b(?:order|ord\.?)\s*(?:no\.?|number|id|#)?\s*([A-Z0-9\-]{5,20})\b",
+        r"(?i)\b(OD|ORD|INV|TXN|REF|ORDER)[-/]?(\d{8,15})\b",
+        r"\b\d{3}[-\s]\d{7}[-\s]\d{7}\b",
     ],
 }
 
@@ -198,8 +198,12 @@ def extract_entities_deterministic(text: str) -> Dict[str, List[Dict[str, Any]]]
         # Create entity objects with metadata
         entity_list = []
         for match in matches:
+            # Handle findall returning tuples (when capturing groups are used)
+            if isinstance(match, tuple):
+                match = "".join(match)
+            
             # Clean and normalize
-            clean_match = match.strip()
+            clean_match = str(match).strip()
             if entity_type == "bank_accounts":
                 clean_match = re.sub(r'\s+', '', clean_match)  # Remove spaces
             
