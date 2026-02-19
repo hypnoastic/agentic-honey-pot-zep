@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException, Header, Depends, Request, Background
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import get_settings
-from models.schemas import AnalyzeRequest, AnalyzeResponse, ExtractedEntities
+from models.schemas import AnalyzeRequest, HoneypotResponse, AnalyzeResponse
 from graph.workflow import run_honeypot_analysis
 
 settings = get_settings()
@@ -161,7 +161,7 @@ async def health_check():
 
 @app.post(
     "/analyze",
-    response_model=AnalyzeResponse,
+    response_model=HoneypotResponse,
     summary="Analyze message for scam detection",
     description="Analyzes incoming message for scam indicators and extracts intelligence through simulated engagement. Supports multi-turn memory via conversation_id."
 )
@@ -251,18 +251,30 @@ async def analyze_message(
             metadata=metadata
         )
         
-        # 5. Safe Construction
+        # 5. Safe Construction — workflow already returns HoneypotResponse.
+        # If result is already a HoneypotResponse, use it directly.
+        # If it's a plain dict (legacy fallback), wrap it.
         from utils.safe_response import construct_safe_response
-        response = construct_safe_response(result, conversation_id)
+        from models.schemas import HoneypotResponse
+        if isinstance(result, HoneypotResponse):
+            response = result
+            # Ensure sessionId is set correctly
+            if not response.sessionId:
+                response = response.model_copy(update={"sessionId": conversation_id})
+        elif isinstance(result, dict):
+            response = construct_safe_response(result, conversation_id)
+        else:
+            response = construct_safe_response({}, conversation_id)
         
-        logger.info(f"[{request_id}] Analysis complete. Status: {response.status}")
+        logger.info(f"[{request_id}] Analysis complete. scamDetected={response.scamDetected}")
         return response
         
     except Exception as e:
         # 5. Global Error Boundary
         logger.exception(f"[{request_id}] CRITICAL FAILURE: {str(e)}")
         from utils.safe_response import create_fallback_response
-        return create_fallback_response("Internal system error during analysis")
+        fb = create_fallback_response("Internal system error during analysis", conversation_id)
+        return fb
 
 
 @app.get("/analyze")
@@ -270,7 +282,7 @@ async def analyze_get():
     """Compatibility endpoint for testers checking existence via GET."""
     return {"status": "ready", "message": "Send POST request to analyze"}
 
-@app.post("/analyze/")
+@app.post("/analyze/", response_model=HoneypotResponse)
 async def analyze_trailing_slash(
     request: AnalyzeRequest,
     raw_request: Request,

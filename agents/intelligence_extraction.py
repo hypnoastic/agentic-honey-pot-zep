@@ -1,14 +1,10 @@
 """
-Intelligence Extraction Agent
-HARDENED PIPELINE:
-Deterministic Regex → LLM Verification → Re-validation → Normalization → Safe Merge
-
-Security Guarantees:
-- LLM cannot invent entities (post-validation enforced)
-- All outputs validated against source text
-- Confidence-based per-turn filtering
-- Canonical normalization before merge
-- Deduplicated + confidence-prioritized merging
+Intelligence Extraction Agent — UPGRADED PIPELINE
+Fixes:
+  1. Scans FULL conversation history (not just latest message)
+  2. Extracts all 8 entity types required by scoring rubric
+  3. Set-based deduplication eliminates duplicate values
+  4. Hardened anti-hallucination via LLM verification
 """
 
 import re
@@ -30,44 +26,53 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
-# STRICT LLM PROMPT (HARDENED)
+# ALL 8 ENTITY TYPES  (must match scoring rubric)
 # =============================================================================
 
-LLM_VERIFY_PROMPT = """
-You are a STRICT intelligence verification system.
+EXPECTED_ENTITY_KEYS = {
+    "upi_ids",
+    "bank_accounts",
+    "phone_numbers",
+    "phishing_urls",
+    "ifsc_codes",
+    "email_addresses",
+    "case_ids",
+    "policy_numbers",
+    "order_numbers",
+}
 
-CONVERSATION TEXT:
+
+LLM_VERIFY_PROMPT = """
+You are a STRICT intelligence verification system for a scam-detection honeypot.
+
+FULL CONVERSATION TEXT:
 {conversation}
 
 REGEX-DETECTED ENTITIES:
 {regex_entities}
 
-You MUST:
-- Only validate entities present in the text above.
-- Recover obfuscated entities ONLY if reconstructable from the text.
-- NEVER invent new values.
-- NEVER guess missing digits.
+RULES:
+- Only validate entities that are PRESENT (or lightly obfuscated) in the text above.
+- Recover obfuscated entities ONLY if they are clearly reconstructable from the text.
+- NEVER invent or guess values not in the text.
+- NEVER hallucinate digits or characters.
+- Confidence: 1.0=exact match, 0.8-0.9=clear obfuscation, 0.6-0.7=weak, <0.6=discard
 
-If an entity cannot be directly found or reconstructed from the conversation,
-DO NOT include it.
+Entity types to check (all 8):
+upi_ids, bank_accounts, phone_numbers, phishing_urls, email_addresses,
+case_ids, policy_numbers, order_numbers
 
-Confidence rules:
-1.0 = Exact literal match
-0.8-0.9 = Recovered from clear obfuscation
-0.6-0.7 = Weak reconstruction
-<0.6 = Discard
-
-Entity types allowed:
-upi_ids, bank_accounts, phone_numbers, phishing_urls, ifsc_codes
-
-Return ONLY valid JSON:
+Return ONLY valid JSON (no prose, no markdown):
 {{
   "verified_entities": {{
     "upi_ids": [],
     "bank_accounts": [],
     "phone_numbers": [],
     "phishing_urls": [],
-    "ifsc_codes": []
+    "email_addresses": [],
+    "case_ids": [],
+    "policy_numbers": [],
+    "order_numbers": []
   }},
   "obfuscation_detected": {{
     "type": "",
@@ -77,16 +82,6 @@ Return ONLY valid JSON:
 """
 
 
-EXPECTED_ENTITY_KEYS = {
-    "upi_ids",
-    "bank_accounts",
-    "phone_numbers",
-    "phishing_urls",
-    "ifsc_codes",
-    "email_addresses",
-}
-
-
 # =============================================================================
 # MAIN AGENT
 # =============================================================================
@@ -94,103 +89,98 @@ EXPECTED_ENTITY_KEYS = {
 async def intelligence_extraction_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Extract intelligence using hardened pipeline.
+    Scans FULL conversation history for maximum extraction coverage.
     """
 
     conversation_history = state.get("conversation_history", [])
 
-    scammer_messages = [t for t in conversation_history if t["role"] == "scammer"]
-    latest_text = state.get("original_message", "")
-    if not latest_text and scammer_messages:
-        latest_text = scammer_messages[-1]["message"]
+    # ── Build full scammer text corpus ────────────────────────────────────────
+    # Extract from ALL scammer turns, not just the latest message
+    scammer_turns = [
+        t["message"] for t in conversation_history
+        if t.get("role") == "scammer" and t.get("message")
+    ]
+    # Also include the original incoming message (sometimes not in history yet)
+    original = state.get("original_message", "")
+    if original and original not in scammer_turns:
+        scammer_turns.append(original)
 
-    if not latest_text:
+    if not scammer_turns:
         return {"current_agent": "planner"}
 
-    # -------------------------------------------------------------------------
-    # STEP 1: Deterministic Regex Extraction (Latest Only)
-    # -------------------------------------------------------------------------
+    full_corpus = "\n".join(scammer_turns)
 
-    new_regex_entities = extract_entities_deterministic(latest_text)
+    # ── STEP 1: Deterministic Regex on FULL corpus ────────────────────────────
+    new_regex_entities = extract_entities_deterministic(full_corpus)
 
+    # Also run on initial prefilter entities if first turn
     if len(conversation_history) <= 1:
         prefilter_entities = state.get("prefilter_entities", {})
         if prefilter_entities:
-            new_regex_entities = merge_entities(
-                new_regex_entities, prefilter_entities
-            )
+            new_regex_entities = merge_entities(new_regex_entities, prefilter_entities)
 
-    # -------------------------------------------------------------------------
-    # STEP 2: LLM Verification (Context Window for Obfuscation Recovery)
-    # -------------------------------------------------------------------------
-
+    # ── STEP 2: LLM Verification ──────────────────────────────────────────────
     try:
-        conversation_window = conversation_history[-3:]
-        # Sanitize input to prevent prompt injection
+        # Use a capped window (last 6 turns) to avoid token overflow
+        window = conversation_history[-6:]
         combined_text = "\n".join(
-            t["message"].replace("{", "").replace("}", "")[:500]  # Limit length, remove template chars
-            for t in conversation_window
+            t["message"].replace("{", "").replace("}", "")[:600]
+            for t in window
+            if t.get("message")
         )
+        # Always include original message
+        if original and original not in combined_text:
+            combined_text = original + "\n" + combined_text
 
         prompt = LLM_VERIFY_PROMPT.format(
-            conversation=combined_text,
+            conversation=combined_text[:3000],
             regex_entities=_format_entities_for_prompt(new_regex_entities)
         )
 
-        from utils.llm_client import call_llm_async
-
         response_text = await call_llm_async(
             prompt=prompt,
-            system_instruction="Verify and recover entities strictly from text.",
+            system_instruction="Verify and recover entities strictly from the conversation. Return JSON only.",
             json_mode=True,
             agent_name="extraction",
         )
 
         llm_result = parse_json_safely(response_text) or {}
         new_llm_entities = llm_result.get("verified_entities", {})
-        
-        # Schema enforcement
+
+        # Schema enforcement — only allow known entity types
         new_llm_entities = _enforce_schema(new_llm_entities)
 
-        # Re-validate against text (anti-hallucination guarantee)
+        # Anti-hallucination: validate every LLM entity is actually in the text
         new_llm_entities = _validate_llm_output_against_text(
-            new_llm_entities, combined_text
+            new_llm_entities, full_corpus + "\n" + combined_text
         )
 
-        combined_new_entities = merge_entities(
-            new_regex_entities, new_llm_entities
-        )
+        combined_new_entities = merge_entities(new_regex_entities, new_llm_entities)
 
     except Exception as e:
         logger.warning(f"LLM verification failed: {e}")
         combined_new_entities = new_regex_entities
 
-    # -------------------------------------------------------------------------
-    # STEP 3: Normalize + Per-turn Confidence Filter
-    # -------------------------------------------------------------------------
-
+    # ── STEP 3: Normalize + Confidence Filter ────────────────────────────────
     combined_new_entities = _normalize_entities(combined_new_entities)
-    combined_new_entities = filter_low_confidence(
-        combined_new_entities, threshold=0.6
-    )
+    combined_new_entities = filter_low_confidence(combined_new_entities, threshold=0.6)
 
-    # -------------------------------------------------------------------------
-    # STEP 4: Incremental Merge with Prior Entities
-    # -------------------------------------------------------------------------
-    # state["extracted_entities"] already contains prior entities loaded from
-    # memory by create_initial_state(). We merge NEW extractions into them.
-    # -------------------------------------------------------------------------
-
+    # ── STEP 4: Merge with Prior Entities ────────────────────────────────────
     existing_entities = state.get("extracted_entities", {}) or {}
-    
-    # Merge: existing (from prior turns via memory) + new extractions
     final_entities = merge_entities(existing_entities, combined_new_entities)
-    
-    # Schema enforcement
+
+    # Schema enforcement — guarantee all 8 keys exist
     final_entities = _enforce_schema(final_entities)
-    
-    # logger.info(f"📊 ENTITY MERGE: prior={_count_entities(existing_entities)}, new={_count_entities(combined_new_entities)}, final={_count_entities(final_entities)}")
+
+    # ── STEP 5: Set-based Global Deduplication ────────────────────────────────
+    final_entities = _deduplicate_all(final_entities)
+
     from utils.logger import AgentLogger
-    merged_details = f"Prior={_count_entities(existing_entities)}, New={_count_entities(combined_new_entities)}, Final={_count_entities(final_entities)}"
+    merged_details = (
+        f"Prior={_count_entities(existing_entities)}, "
+        f"New={_count_entities(combined_new_entities)}, "
+        f"Final={_count_entities(final_entities)}"
+    )
     AgentLogger._print_colored("INTELLIGENCE", "yellow", "📊", "Entity Merge", merged_details)
 
     return {
@@ -200,7 +190,6 @@ async def intelligence_extraction_agent(state: Dict[str, Any]) -> Dict[str, Any]
 
 
 def _count_entities(entities: Dict) -> int:
-    """Count total entities across all types."""
     total = 0
     for v in entities.values():
         if isinstance(v, list):
@@ -213,11 +202,32 @@ def _count_entities(entities: Dict) -> int:
 # =============================================================================
 
 def _enforce_schema(entities: Dict) -> Dict:
-    """Remove unknown entity types."""
-    return {
-        key: entities.get(key, [])
-        for key in EXPECTED_ENTITY_KEYS
-    }
+    """Ensure all 8 entity types are present (with empty lists as default)."""
+    return {key: entities.get(key, []) for key in EXPECTED_ENTITY_KEYS}
+
+
+def _deduplicate_all(entities: Dict) -> Dict:
+    """
+    Global deduplication across all entity types.
+    Removes duplicate values (case-insensitive comparison for strings).
+    Preserves the first (highest-confidence) occurrence.
+    """
+    deduped = {}
+    for entity_type, items in entities.items():
+        seen = set()
+        clean = []
+        for item in items:
+            if isinstance(item, dict):
+                val = str(item.get("value", "")).strip().lower()
+                raw = item
+            else:
+                val = str(item).strip().lower()
+                raw = item
+            if val and val not in seen:
+                seen.add(val)
+                clean.append(raw)
+        deduped[entity_type] = clean
+    return deduped
 
 
 def _validate_llm_output_against_text(
@@ -225,19 +235,15 @@ def _validate_llm_output_against_text(
     source_text: str
 ) -> Dict:
     """
-    Ensure every returned entity is present or reconstructable
-    from source text.
+    Anti-hallucination: every entity must be findable (or lightly normalized)
+    in the source text.
     """
-
     validated = {}
-
     normalized_source = source_text.replace(" ", "").lower()
-    # Support common substitutions in source for validation
     normalized_source = normalized_source.replace("o", "0")
 
     for entity_type, items in llm_entities.items():
         validated[entity_type] = []
-
         for item in items:
             if isinstance(item, str):
                 value = item
@@ -245,21 +251,18 @@ def _validate_llm_output_against_text(
                 value = str(item.get("value", ""))
             if not value:
                 continue
-
             normalized_value = value.replace(" ", "").lower()
-            # If the value is '9876543210', it matches against '9876543210' (where original was '...1o')
-            if normalized_value in normalized_source:
+            if (
+                normalized_value in normalized_source
+                or normalized_value.replace("0", "o") in normalized_source
+            ):
                 validated[entity_type].append(item)
-            elif normalized_value.replace("0", "o") in normalized_source:
-                validated[entity_type].append(item)
-
     return validated
 
 
 def _normalize_entities(entities: Dict) -> Dict:
-    """Canonical normalization layer using entity_utils."""
+    """Canonical normalization using entity_utils."""
     normalized = {}
-
     for key, items in entities.items():
         normalized[key] = []
         for item in items:
@@ -268,44 +271,11 @@ def _normalize_entities(entities: Dict) -> Dict:
                 norm_val = normalize_entity_value(raw_val, key)
                 item["value"] = norm_val
                 normalized[key].append(item)
-
-    # Disambiguate after normalization
     return disambiguate_entities(normalized)
 
 
-def _safe_confidence_merge(existing: Dict, new: Dict) -> Dict:
-    """
-    Merge with confidence prioritization.
-    Keeps highest-confidence version of duplicates.
-    """
-
-    merged = existing.copy()
-
-    for entity_type, items in new.items():
-        if entity_type not in merged:
-            merged[entity_type] = []
-
-        existing_map = {
-            e["value"]: e for e in merged[entity_type]
-        }
-
-        for item in items:
-            value = item["value"]
-            new_conf = item.get("confidence", 0)
-
-            if value in existing_map:
-                if new_conf > existing_map[value].get("confidence", 0):
-                    existing_map[value] = item
-            else:
-                existing_map[value] = item
-
-        merged[entity_type] = list(existing_map.values())
-
-    return merged
-
-
 def _format_entities_for_prompt(entities: Dict) -> str:
-    """Format entities for LLM prompt."""
+    """Format entities dict for LLM prompt."""
     lines = []
     for entity_type, items in entities.items():
         if items:
@@ -317,34 +287,44 @@ def _format_entities_for_prompt(entities: Dict) -> str:
                     values.append(str(item))
             if values:
                 lines.append(f"- {entity_type}: {', '.join(values[:5])}")
-
     return "\n".join(lines) if lines else "None extracted"
+
 
 def regex_only_extraction_agent(state: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Fast, deterministic extraction using REGEX ONLY.
+    Fast, deterministic extraction using REGEX ONLY on FULL conversation history.
     Used during the engagement loop to minimize latency.
     """
-    from utils.prefilter import extract_entities_deterministic, merge_entities
-    
+    from utils.prefilter import extract_entities_deterministic
+
     conversation_history = state.get("conversation_history", [])
-    scammer_messages = [t for t in conversation_history if t["role"] == "scammer"]
-    latest_text = (
-        scammer_messages[-1]["message"]
-        if scammer_messages
-        else state.get("original_message", "")
-    )
-    
-    if not latest_text:
+
+    # Collect ALL scammer turns
+    scammer_texts = [
+        t["message"] for t in conversation_history
+        if t.get("role") == "scammer" and t.get("message")
+    ]
+    original = state.get("original_message", "")
+    if original and original not in scammer_texts:
+        scammer_texts.append(original)
+
+    if not scammer_texts:
         return {"current_agent": "response_formatter"}
-            
-    # Run deterministic extraction
-    regex_entities = extract_entities_deterministic(latest_text)
-    
-    # Merge with existing entities
-    current_entities = state.get("extracted_entities", {}) or {}
+
+    full_corpus = "\n".join(scammer_texts)
+
+    # Run deterministic extraction on full corpus
+    regex_entities = extract_entities_deterministic(full_corpus)
+
+    # Enforce all 8 entity keys
+    regex_entities = _enforce_schema(regex_entities)
+
+    # Merge with existing
+    current_entities = _enforce_schema(state.get("extracted_entities", {}) or {})
     final_entities = merge_entities(current_entities, regex_entities)
-    
+    final_entities = _enforce_schema(final_entities)
+    final_entities = _deduplicate_all(final_entities)
+
     return {
         "extracted_entities": final_entities,
         "current_agent": "response_formatter"

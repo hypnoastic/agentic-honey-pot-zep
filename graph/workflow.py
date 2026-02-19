@@ -403,10 +403,8 @@ async def run_honeypot_workflow(
             background_embedding=False  # Blocking to ensure intelligence event is recorded
         )
         
-        # 6. Final Return
-        if "final_response" in final_state:
-            return final_state["final_response"]
-            
+        # 6. Final Return — always use construct_safe_response so we get
+        #    HoneypotResponse format with camelCase fields, engagementMetrics, etc.
         from utils.safe_response import construct_safe_response
         return construct_safe_response(final_state, conversation_id)
 

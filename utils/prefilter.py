@@ -82,7 +82,10 @@ ENTITY_PATTERNS: Dict[str, List[str]] = {
         r"\b[\w\.\-]+@(?:upi|paytm|gpay|phonepe|ybl|oksbi|okaxis|okicici|okhdfcbank|axl|apl|ibl|sbi|icici|hdfc|yesbank|axisbank|fakebank)\b",
     ],
     "bank_accounts": [
-        r"\b\d{9,18}\b",
+        # Match 11-18 digit numbers (avoids 10-digit Indian phone numbers)
+        r"\b\d{11,18}\b",
+        # Also match explicitly labelled account numbers that may be shorter
+        r"(?i)(?:account|a\/c|acct)[\s#:]*(\d{9,18})\b",
     ],
     "ifsc_codes": [
         r"\b[A-Z]{4}0[A-Z0-9]{6}\b",
@@ -96,6 +99,21 @@ ENTITY_PATTERNS: Dict[str, List[str]] = {
     ],
     "email_addresses": [
         r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",
+    ],
+    "case_ids": [
+        r"\b(?:case|complaint|ticket|ref|reference)\s*(?:no\.?|number|id|#)\s*[A-Z0-9\-]{4,20}\b",
+        r"\bCASE[-/]?\d{4,15}\b",
+        r"\bCRN[-/]?\d{6,15}\b",
+    ],
+    "policy_numbers": [
+        r"\b(?:policy|pol\.?)\s*(?:no\.?|number|#)\s*[A-Z0-9\-]{5,20}\b",
+        r"\b(?:LIC|SBI|HDFC|ICICI|BAJAJ|MAX|TATA)[-/]?\d{8,14}\b",
+        r"\b\d{6,9}[-/]\d{2,3}[-/]\d{2,5}\b",  # 123456789/01/001 style
+    ],
+    "order_numbers": [
+        r"\b(?:order|ord\.?)\s*(?:no\.?|number|id|#)\s*[A-Z0-9\-]{5,20}\b",
+        r"\b(?:OD|ORD|INV|TXN|REF)\d{8,15}\b",
+        r"\b\d{3}[-\s]\d{7}[-\s]\d{7}\b",  # Amazon-style order numbers
     ],
 }
 

@@ -64,9 +64,15 @@ async def response_formatter_agent(state: Dict[str, Any]) -> Dict[str, Any]:
         "scam_type": scam_type,
         "confidence_score": confidence,
         "extracted_entities": {
+            # All 8 entity types for scoring rubric
             "bank_accounts": _flatten_entities(entities.get("bank_accounts", [])),
             "upi_ids": _flatten_entities(entities.get("upi_ids", [])),
-            "phishing_urls": _flatten_entities(entities.get("phishing_urls", []))
+            "phishing_urls": _flatten_entities(entities.get("phishing_urls", [])),
+            "phone_numbers": _flatten_entities(entities.get("phone_numbers", [])),
+            "email_addresses": _flatten_entities(entities.get("email_addresses", [])),
+            "case_ids": _flatten_entities(entities.get("case_ids", [])),
+            "policy_numbers": _flatten_entities(entities.get("policy_numbers", [])),
+            "order_numbers": _flatten_entities(entities.get("order_numbers", [])),
         },
         "behavioral_signals": state.get("behavioral_signals", []),
         "confidence_factors": state.get("confidence_factors", {}),
@@ -74,7 +80,11 @@ async def response_formatter_agent(state: Dict[str, Any]) -> Dict[str, Any]:
         "persona_name": state.get("persona_name"),
         "engagement_count": state.get("engagement_count", 0),
         "strategy_hint": state.get("strategy_hint"),
-        "reply": (state.get("final_response") or {}).get("agent_response")
+        "reply": (state.get("final_response") or {}).get("agent_response"),
+        # Pass timing for safe_response.py to compute duration
+        "engagement_start_time": state.get("engagement_start_time", 0),
+        # Pass conversation_history length for message count
+        "conversation_history_len": len(state.get("conversation_history", [])),
     }
 
     return {
