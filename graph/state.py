@@ -147,8 +147,8 @@ def create_initial_state(
         red_flags_mentioned=memory.get("red_flags_mentioned", 0),
         elicitation_attempts=memory.get("elicitation_attempts", 0),
 
-        # Timing — set at workflow start
-        engagement_start_time=time.time(),
+        # Timing — load from memory or generate at session start
+        engagement_start_time=memory.get("engagement_start_time") or time.time(),
 
         # Extraction
         extracted_entities=blank_entities,
