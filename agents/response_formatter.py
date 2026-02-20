@@ -87,26 +87,6 @@ async def response_formatter_agent(state: Dict[str, Any]) -> Dict[str, Any]:
         "conversation_history_len": len(state.get("conversation_history", [])),
     }
 
-    # ── Ensure reply is always non-null ────────────────────────────────────────
-    # On the judge/end path, persona agent is skipped so agent_response is never set.
-    # Fall back to the last honeypot message in history, then a closing phrase.
-    if not final_response["reply"]:
-        history = state.get("conversation_history", [])
-        last_honeypot = next(
-            (t["message"] for t in reversed(history) if t.get("role") == "honeypot"),
-            None
-        )
-        if last_honeypot:
-            final_response["reply"] = last_honeypot
-        else:
-            # Natural closing reply for judge termination
-            scam_t = scam_type or "suspicious activity"
-            final_response["reply"] = (
-                f"Thank you for bringing this to my attention. "
-                f"I will verify this independently and report this {scam_t.lower().replace('_', ' ')} "
-                f"to the authorities. Goodbye."
-            )
-
     return {
         "conversation_summary": summary,
         "final_response": final_response,
