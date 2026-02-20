@@ -223,7 +223,7 @@ async def planner_agent(state: Dict[str, Any]) -> Dict[str, Any]:
         "current_agent": "planner"
     }
 
-    AgentLogger.plan_decision(turns_used, max_turns, action, strategy_hint)
+    AgentLogger.plan_decision(turns_used + 1, max_turns, action, strategy_hint)
 
     # ── VERDICT AUTHORITY ──────────────────────────────────────────────────
     if action == "judge":
@@ -319,8 +319,10 @@ def _check_smart_exit(
             return True, f"T{turns}: Target reached ({high_value} entities, {distinct_types} types)."
 
     if turns >= 10:
-        if high_value >= 1:
-            return True, "T10+: Late exit with any yield."
+        if total >= 1:
+            return True, "T10+: Forced exit with any extracted entity."
+        if turns >= 11:
+            return True, "T11+: Absolute force exit threshold."
 
     return False, ""
 
