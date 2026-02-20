@@ -13,18 +13,21 @@ def normalize_entity_value(value: str, entity_type: str) -> str:
     clean_value = value.strip()
     
     if entity_type == "phone_numbers":
-        # Remove all non-digits
+        # Strip everything to digits first
         digits = re.sub(r"\D", "", clean_value)
-        # Handle Indian 10-digit numbers (remove leading 91, 0, +91)
-        if len(digits) > 10 and (digits.startswith("91") or digits.startswith("091")):
-             # Potential +91 or 091 prefix
-             if digits.startswith("091"):
-                 digits = digits[3:]
-             else:
-                 digits = digits[2:]
+        # Normalize to 10-digit core (strip leading 91 / 091 / 0)
+        if len(digits) > 10:
+            if digits.startswith("091"):
+                digits = digits[3:]
+            elif digits.startswith("91"):
+                digits = digits[2:]
         elif len(digits) == 11 and digits.startswith("0"):
             digits = digits[1:]
-        return digits
+        # Validate: must be exactly 10 digits
+        if len(digits) != 10:
+            return ""
+        # Always store in canonical +91-XXXXXXXXXX format
+        return f"+91-{digits}"
     
     if entity_type == "bank_accounts":
         # Remove all non-digits and spaces
@@ -69,20 +72,26 @@ def disambiguate_entities(entities: Dict[str, List[Any]]) -> Dict[str, List[Any]
     Prevent one value from being assigned to multiple conflicting types.
     Priority: Phone Numbers > Bank Accounts (if 10 digits).
     """
-    phone_vals = {normalize_entity_value(e.get("value") if isinstance(e, dict) else e, "phone_numbers") 
-                  for e in entities.get("phone_numbers", [])}
-    
-    # Filter bank accounts that are actually phone numbers
+    # Extract 10-digit cores from normalized phone values (+91-XXXXXXXXXX -> XXXXXXXXXX)
+    def _phone_core(val: str) -> str:
+        digits = re.sub(r"\D", "", val)
+        return digits[-10:] if len(digits) >= 10 else digits
+
+    phone_cores = {
+        _phone_core(normalize_entity_value(e.get("value") if isinstance(e, dict) else e, "phone_numbers"))
+        for e in entities.get("phone_numbers", [])
+    }
+
+    # Filter bank accounts that are actually phone numbers (10-digit match)
     if "bank_accounts" in entities:
         new_bank_list = []
         for item in entities["bank_accounts"]:
             val = normalize_entity_value(item.get("value") if isinstance(item, dict) else item, "bank_accounts")
-            # If it looks like a phone number (10 digits) and matches an existing phone number, skip it
-            if len(val) == 10 and val in phone_vals:
+            if len(val) == 10 and val in phone_cores:
                 continue
             new_bank_list.append(item)
         entities["bank_accounts"] = new_bank_list
-        
+
     return entities
 
 
