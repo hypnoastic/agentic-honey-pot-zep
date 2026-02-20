@@ -21,7 +21,8 @@ async def send_guvi_callback(
     engagement_duration_seconds: float,
     extracted_intelligence: Dict[str, List[str]],
     agent_notes: str,
-    scam_indicators: Optional[List[str]] = None
+    scam_type: Optional[str] = None,
+    confidence_level: Optional[float] = None,
 ) -> bool:
     """
     Send final result to GUVI evaluation endpoint.
@@ -67,7 +68,8 @@ async def send_guvi_callback(
             "orderNumbers": flatten(extracted_intelligence.get("order_numbers", []))
         },
         "agentNotes": agent_notes,
-        "scamIndicators": scam_indicators or flatten(extracted_intelligence.get("keywords", []))
+        "scamType": scam_type,
+        "confidenceLevel": round(confidence_level, 4) if confidence_level is not None else None,
     }
     
     # Log full payload for debugging

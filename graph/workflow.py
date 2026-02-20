@@ -293,7 +293,8 @@ async def _trigger_guvi_callback_with_retry(state: Dict[str, Any], conversation_
                 engagement_duration_seconds=duration_seconds,
                 extracted_intelligence=entities,
                 agent_notes=notes,
-                scam_indicators=state.get("scam_indicators", []) + state.get("behavioral_signals", [])
+                scam_type=state.get("scam_type"),
+                confidence_level=state.get("confidence_score"),
             )
             if success:
                 # logger.info(f"✅ GUVI callback successful for {conversation_id}")
