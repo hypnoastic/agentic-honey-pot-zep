@@ -279,6 +279,9 @@ def _determine_verdict(
         verdict = "SUSPICIOUS"
         confidence = min(confidence, 0.79)
 
+    # Force exactly 2 decimal places
+    confidence = round(confidence, 2)
+
     flag_details = ", ".join(indicators[:5]) if indicators else "None specific"
     behavior_signals = state.get("behavioral_signals", [])
     behavior_details = ", ".join(behavior_signals[:3]) if behavior_signals else "None specific"

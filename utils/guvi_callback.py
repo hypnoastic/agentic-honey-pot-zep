@@ -69,7 +69,7 @@ async def send_guvi_callback(
         },
         "agentNotes": agent_notes,
         "scamType": scam_type,
-        "confidenceLevel": round(confidence_level, 4) if confidence_level is not None else None,
+        "confidenceLevel": round(confidence_level, 2) if confidence_level is not None else None,
     }
     
     # Log full payload for debugging

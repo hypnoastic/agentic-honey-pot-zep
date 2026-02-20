@@ -94,7 +94,7 @@ def construct_safe_response(result: Dict[str, Any], conversation_id: str) -> Hon
         confidence = final.get("confidence_score") or result.get("confidence_score") or 0.0
         try:
             confidence = float(confidence)
-            confidence = round(min(1.0, max(0.0, confidence)), 4)
+            confidence = round(min(1.0, max(0.0, confidence)), 2)
         except (TypeError, ValueError):
             confidence = 0.0
 
